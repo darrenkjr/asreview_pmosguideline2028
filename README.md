@@ -1,3 +1,10 @@
+# PMOS Guideline
+
+Fork of the ASReview Open source Screening software to support and pilot workflows specific for guideline development. 
+
+Specifically: Overarching search and triage where a team screens records and assigns them to 1 of X topics - with a stopping criteria
+
+---
 <!-- ASReview LAB v3 Banner -->
 <p align="center">
   <img width="60%" height="60%" src="https://raw.githubusercontent.com/asreview/asreview-artwork/refs/heads/master/LogoASReview/asreview_logo_light.svg">
