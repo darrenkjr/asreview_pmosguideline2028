@@ -238,7 +238,7 @@ class NConsecutiveIrrelevant(BaseEstimator):
     label = "N Consecutive Irrelevant"
     is_configurable = True
 
-    def __init__(self, n: int):
+    def __init__(self, n: int = 100):
         self.n = n
 
     @safe_stop
