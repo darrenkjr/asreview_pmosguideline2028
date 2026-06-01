@@ -33,6 +33,7 @@ __all__ = [
     "QuantileLabeled",
     "IsFittable",
     "NConsecutiveIrrelevant",
+    "StatisticalBuscarpy"
 ]
 
 
@@ -261,3 +262,124 @@ class NConsecutiveIrrelevant(BaseEstimator):
             return True
 
         return False
+
+class StatisticalBuscarpy(BaseEstimator): 
+    """Statistical stopping criterion based on hypothesis test based on hypergeometric distribution as proposed by   
+    Callaghan et al. (2020). Uses the implementation in the buscarpy python package. 
+    
+    Models screening as sampling without replacement and tests the null hypothesis that the recall target has not yet been
+    achieved up to a certain confidence level. Stops when p-value falls below certain confidence threshold. 
+
+    Arguments 
+    ---
+    recall_target: float
+        Target recall / sensitivity rate. 
+        Default : 0.95
+
+    confidence_level: float
+        Confidence threshold for when to suggest to stop screening 
+        Default: 0.95
+
+    bias: float 
+        How much more likely a relevant record is to be sample than an irrelevant one. 
+        1.0 Indicates most conservative assumption, where each article is being sampled in random order. Bias >1.0 implies 
+        that relevant records are more likely to be sampled than irrelevant records (e.g. relevant records appear earlier in
+        the list) due to AI ordering. 
+        Default: 1.0 
+        
+    eval_every: int
+        Number of records in an interval to screen before evaluating whether to stop. 
+        Default: 10
+
+    warmup: int 
+        Number of records that need to be screened before evaluation begins 
+        Default: 20
+    """
+    name = "statistical_buscarpy"
+    label = "Statistical Buscarpy"
+    
+    def __init__(
+        self, 
+        recall_target = 0.95, 
+        confidence_level = 0.95, 
+        bias = 1.0, 
+        eval_every = 10, 
+        warmup = 20
+    ):
+
+        self.recall_target = recall_target
+        self.confidence_level = confidence_level
+        self.bias = bias
+        self.eval_every = eval_every
+        self.warmup = warmup
+
+    def evaluate(self, results, data): 
+        """Return p value from buscarpy based on current screening process
+        
+        Arguments
+        ---------
+        results: pandas.DataFrame
+            DataFrame with the results of the review, including a "label"
+            column ordered by screening time.
+        data: pandas.DataFrame, list, np.array
+            All records. Used to determine the total number of records N.
+
+        Returns
+        -------
+        dict:
+            Dictionary with the results of the evaluation, including "p" 
+            (p-value), "should_stop" (boolean), and "reason" (string).
+        """
+        
+        import buscarpy
+
+        n_screened = len(results)
+        n_total = len(data)
+
+        assert n_total != 0
+        assert n_screened < n_total
+
+        if n_screened < self.warmup:
+            return {"p": None, "should_stop": False, "reason": "warmup"}
+        if int(results["label"].sum()) == 0:
+            return {"p": None, "should_stop": False, "reason": "no_relevant_yet"}
+
+        labels = results["label"].astype(int).to_numpy()
+        p = buscarpy.calculate_h0(
+            labels_=labels,
+            N=int(n_total),
+            recall_target=self.recall_target,
+            bias=self.bias,
+        )
+        alpha = 1.0 - self.confidence_level
+        return {
+            "p": None if p is None else float(p),
+            "should_stop": p is not None and p < alpha,
+            "reason": "evaluated",
+        }      
+    
+    @safe_stop
+    def stop(self, results, data): 
+        """Check if current review cycle should be stopped. 
+
+        Arguments
+        ---------
+        results: pandas.DataFrame
+            DataFrame with the results of the review, including a "label"
+            column ordered by screening time.
+        data: pandas.DataFrame, list, np.array
+            All records. Used to determine the total number of records N.
+
+        Returns
+        -------
+        bool:
+            True if the review should be stopped, False otherwise.
+        """
+        n_screened = len(results)
+        if n_screened < self.warmup or (n_screened % self.eval_every) != 0:
+            return False
+        return self.evaluate(results, data)["should_stop"]
+
+        
+
+    

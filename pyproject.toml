@@ -67,6 +67,7 @@ dependencies = [
     "datahugger>=0.2",
     "synergy_dataset",
     "sqlalchemy-utils",
+    "buscarpy",
     "tomli; python_version < '3.11'",
 ]
 dynamic = ["version"]
