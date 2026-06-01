@@ -135,6 +135,7 @@ n_labeled = "asreview.models.stoppers:NLabeled"
 q_labeled = "asreview.models.stoppers:QuantileLabeled"
 is_fittable = "asreview.models.stoppers:IsFittable"
 n_consecutive_irrelevant = "asreview.models.stoppers:NConsecutiveIrrelevant"
+statistical_buscarpy = "asreview.models.stoppers:StatisticalBuscarpy"
 
 [project.optional-dependencies]
 lint = ["ruff", "check-manifest"]
