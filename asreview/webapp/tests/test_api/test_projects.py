@@ -1314,3 +1314,137 @@ def test_duplicate_priors_never_appear_during_screening(client, user):
     # Duplicates are hidden during screening (only the base record is shown).
     expected_unlabeled = set(record_ids) - expected_prior_ids
     assert seen_record_ids.issubset(expected_unlabeled)
+
+
+def test_stopping_load_and_mutate(client, project):
+    """Test that editing stopping criteria and retrieving works as expected"""
+    project_id = misc.get_project_id(project)
+
+    # 1. Mutate stopper to n_consecutive_irrelevant with n=30
+    r_post = client.post(
+        f"/api/projects/{project_id}/stopping",
+        data={"stopper": "n_consecutive_irrelevant", "n": "30"}
+    )
+    assert r_post.status_code == 200
+    assert r_post.json["id"] == "n_consecutive_irrelevant"
+    assert r_post.json["params"]["n"] == 30
+
+    # 2. Get stopper info and verify it matches
+    r_get = client.get(f"/api/projects/{project_id}/stopping")
+    assert r_get.status_code == 200
+    assert r_get.json["id"] == "n_consecutive_irrelevant"
+    assert r_get.json["params"]["n"] == 30
+
+
+def test_stopping_partial_defaults(client, project):
+    """Test that specifying certain criteria correctly sets the rest to default values"""
+    project_id = misc.get_project_id(project)
+
+    # 1. Mutate to statistical_buscarpy setting ONLY bias=2.5 and eval_every=5
+    r_post = client.post(
+        f"/api/projects/{project_id}/stopping",
+        data={
+            "stopper": "statistical_buscarpy",
+            "bias": "2.5",
+            "eval_every": "5"
+        }
+    )
+    assert r_post.status_code == 200
+    assert r_post.json["id"] == "statistical_buscarpy"
+
+    # 2. Assert customized parameters are saved with correct types
+    params = r_post.json["params"]
+    assert params["bias"] == 2.5
+    assert params["eval_every"] == 5
+
+    # 3. Assert omitted parameters correctly fell back to their defaults
+    assert params["recall_target"] == 0.95
+    assert params["confidence_level"] == 0.95
+    assert params["warmup"] == 20
+
+@pytest.mark.parametrize("disable_value", ["None", ""])
+def test_stopping_none(client, project, disable_value):
+    """Test that setting the stopper to None correctly disables it in the project."""
+    project_id = misc.get_project_id(project)
+
+    # 1. Disable the stopper by setting it to "None or blank"
+    r_post = client.post(
+        f"/api/projects/{project_id}/stopping",
+        data={"stopper": disable_value}
+    )
+    assert r_post.status_code == 200
+    assert r_post.json["name"] is None
+    assert r_post.json["params"] is None
+
+    # 2. Verify subsequent GET also shows disabled stopper
+    r_get = client.get(f"/api/projects/{project_id}/stopping")
+    assert r_get.status_code == 200
+    assert r_get.json["name"] is None
+    assert r_get.json["params"] is None
+
+
+
+def test_stopping_validation_errors(client, project):
+    """Test that invalid values or simulation-only stoppers are correctly rejected."""
+    project_id = misc.get_project_id(project)
+
+    # 1. Verify invalid parameter value raises 400 Bad Request
+    r_invalid_val = client.post(
+        f"/api/projects/{project_id}/stopping",
+        data={"stopper": "statistical_buscarpy", "bias": "testing"}
+    )
+    assert r_invalid_val.status_code == 400
+    assert "Invalid value" in r_invalid_val.json["message"]
+
+    # 2. Verify simulation-only stopper (last_relevant) is blocked with 400 Bad Request
+    r_sim_only = client.post(
+        f"/api/projects/{project_id}/stopping",
+        data={"stopper": "last_relevant"}
+    )
+    assert r_sim_only.status_code == 400
+    assert "not configurable" in r_sim_only.json["message"]
+
+
+def test_stopping_defaults(client, project):
+    """Test that mutating the stopper without specifying parameters correctly loads defaults."""
+    project_id = misc.get_project_id(project)
+
+    # 1. Mutate stopper to statistical_buscarpy without any extra parameters
+    r = client.post(
+        f"/api/projects/{project_id}/stopping",
+        data={"stopper": "statistical_buscarpy"},
+    )
+    assert r.status_code == 200
+    assert r.json["id"] == "statistical_buscarpy"
+
+    # 2. Assert that all defaults were correctly loaded from the constructor
+    params = r.json["params"]
+    assert params["recall_target"] == 0.95
+    assert params["confidence_level"] == 0.95
+    assert params["bias"] == 1.0
+    assert params["eval_every"] == 10
+    assert params["warmup"] == 20
+
+
+def test_stopping_custom_params(client, project):
+    """Test that custom parameters are correctly parsed, cast, and merged with defaults."""
+    project_id = misc.get_project_id(project)
+
+    # 1. Mutate stopper with a mix of custom float and int string values
+    r = client.post(
+        f"/api/projects/{project_id}/stopping",
+        data={
+            "stopper": "statistical_buscarpy",
+            "bias": "2.5",
+            "warmup": "50",
+        },
+    )
+    assert r.status_code == 200
+    assert r.json["id"] == "statistical_buscarpy"
+
+    # 2. Assert custom parameters are cast and omitted ones fallback to defaults
+    params = r.json["params"]
+    assert params["bias"] == 2.5            # Custom float cast correctly
+    assert params["warmup"] == 50           # Custom int cast correctly
+    assert params["recall_target"] == 0.95  # Omitted parameter fell back to default
+

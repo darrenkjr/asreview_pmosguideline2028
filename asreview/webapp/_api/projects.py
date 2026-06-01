@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from sqlalchemy.util import NoneType
 import base64
 import hashlib
 import hmac
@@ -1372,12 +1373,68 @@ def api_get_stopper(project):  # noqa: F401
 def api_mutate_stopper(project):  # noqa: F401
     """Mutate stopper of a project"""
 
+    from asreview.extensions import load_extension 
+    import inspect
+    import typing 
+    from types import UnionType
+
     model_config = project.get_model_config()
-    model_config["stopper"] = NConsecutiveIrrelevant.name
-    model_config["stopper_param"] = {"n": request.form.get("n", 50, type=int)}
+    stopper_name = request.form.get("stopper")
+        #load user input params 
+    params = request.form.to_dict()
+    if "stopper" in params: 
+        del params['stopper']
+    if not stopper_name and "n" in params:
+        stopper_name = "n_consecutive_irrelevant"
+
+    if not stopper_name or stopper_name == "None":
+        model_config["stopper"] = None
+        model_config["stopper_param"] = {}
+        project.update_review(model=model_config)
+        return api_get_stopper(project.project_id)
+
+
+
+    stopper_class = load_extension("models.stoppers", stopper_name)
+    if not getattr(stopper_class, "is_configurable", True):
+        return jsonify({"message": f"Stopper '{stopper_name}' is not configurable."}), 400
+
+    stopper_params = {}
+    sig = inspect.signature(stopper_class.__init__)
+    for k,v in params.items(): 
+        param_info = sig.parameters.get(k)
+        if not param_info: 
+            continue 
+        annotations = param_info.annotation
+
+        if isinstance(annotations, (typing._GenericAlias, UnionType)):
+            allowed_types = typing.get_args(annotations)
+        else:
+            allowed_types = (annotations,)
+        
+        type_validation = False
+        for target_type in allowed_types: 
+            if target_type is inspect.Parameter.empty or target_type is NoneType: 
+                continue
+            try:
+                stopper_params[k] = target_type(v)
+                type_validation = True
+                break
+            except (ValueError, TypeError): 
+                continue
+        
+        if not type_validation:
+            return jsonify({"message": f"Invalid value '{v}' for parameter '{k}'. Expected value of type: '{allowed_types}'"}), 400
+        
+    
+
+    model_config["stopper"] = stopper_name
+    model_config["stopper_param"] = stopper_params
+
     project.update_review(model=model_config)
 
     return api_get_stopper(project.project_id)
+
 
 
 @bp.route("/projects/<project_id>/progress_data", methods=["GET"])

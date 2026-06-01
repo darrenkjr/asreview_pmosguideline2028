@@ -80,6 +80,8 @@ class LastRelevant(BaseEstimator):
         stop when all relevant records are found.
     """
 
+    is_configurable = False
+
     name = "last_relevant"
     label = "Last Relevant"
 
@@ -125,7 +127,7 @@ class NLabeled(BaseEstimator):
     name = "n_labeled"
     label = "N Labeled"
 
-    def __init__(self, n):
+    def __init__(self, n: int | tuple[int, int]):
         self.n = n
 
     @safe_stop
@@ -180,8 +182,9 @@ class QuantileLabeled(BaseEstimator):
 
     name = "q_labeled"
     label = "Quantile Labeled"
+    is_configurable = True
 
-    def __init__(self, quantile):
+    def __init__(self, quantile: float):
         self.quantile = quantile
 
     @safe_stop
@@ -233,8 +236,9 @@ class NConsecutiveIrrelevant(BaseEstimator):
 
     name = "n_consecutive_irrelevant"
     label = "N Consecutive Irrelevant"
+    is_configurable = True
 
-    def __init__(self, n):
+    def __init__(self, n: int):
         self.n = n
 
     @safe_stop
@@ -297,14 +301,15 @@ class StatisticalBuscarpy(BaseEstimator):
     """
     name = "statistical_buscarpy"
     label = "Statistical Buscarpy"
+    is_configurable = True
     
     def __init__(
         self, 
-        recall_target = 0.95, 
-        confidence_level = 0.95, 
-        bias = 1.0, 
-        eval_every = 10, 
-        warmup = 20
+        recall_target: float = 0.95, 
+        confidence_level: float = 0.95, 
+        bias: float = 1.0, 
+        eval_every: int = 10, 
+        warmup: int = 20
     ):
 
         self.recall_target = recall_target
