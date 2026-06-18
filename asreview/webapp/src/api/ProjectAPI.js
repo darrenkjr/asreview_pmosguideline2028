@@ -590,6 +590,20 @@ class ProjectAPI {
     });
   }
 
+  static fetchWebConfigurableStoppers({ queryKey }) {
+    const url = api_url + `stoppers`;
+    return new Promise((resolve, reject) => {
+      axios
+        .get(url, { withCredentials: true })
+        .then((result) => {
+          resolve(result["data"]);
+        })
+        .catch((error) => {
+          reject(axiosErrorHandler(error));
+        });
+    });
+  }
+
   static fetchStopping({ queryKey }) {
     const { project_id } = queryKey[1];
     const url = api_url + `projects/${project_id}/stopping`;
@@ -607,7 +621,11 @@ class ProjectAPI {
 
   static mutateStopping(variables) {
     let body = new FormData();
-    body.set("n", variables.n);
+    Object.entries(variables).forEach(([key, value]) => {
+      if (key != "project_id" && value !== undefined) {
+        body.set(key, value);
+      }
+    });
 
     const url = api_url + `projects/${variables.project_id}/stopping`;
     return new Promise((resolve, reject) => {

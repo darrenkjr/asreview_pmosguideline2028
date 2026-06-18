@@ -67,6 +67,7 @@ from asreview.metrics import ndcg
 from asreview.models import AI_MODEL_CONFIGURATIONS
 from asreview.models import get_ai_config
 from asreview.models.stoppers import NConsecutiveIrrelevant
+from asreview.models.stoppers import StatisticalBuscarpy
 from asreview.project.exceptions import ProjectError
 from asreview.project.exceptions import ProjectNotFoundError
 from asreview.project.migration import detect_version
@@ -1357,83 +1358,109 @@ def api_get_stopper(project):  # noqa: F401
     else:
         n_since_last_relevant = 0
 
-    return jsonify(
-        {
+    response_dict = {
             "id": stopper.name,
             "params": stopper.get_params(),
             "value": n_since_last_relevant,
-            "stop": stopper.stop(results, data),
+            "stop": bool(stopper.stop(results, data)),
         }
-    )
+
+    if isinstance(stopper, StatisticalBuscarpy):
+        n_screened = len(results)
+        last_eval_step = (n_screened // stopper.eval_every) * stopper.eval_every
+        sliced_results = results.iloc[:last_eval_step]
+        eval_results = stopper.evaluate(sliced_results, data)
+        response_dict["p"] = eval_results["p"]
+        response_dict["reason"] = eval_results["reason"]
+        response_dict["n_screened"] = n_screened
+
+    return jsonify(response_dict)
+
+def get_web_configurable_stoppers(): 
+    import inspect
+    import typing
+    from types import NoneType, UnionType
+
+    available_stoppers = {}
+    for entry_point in extensions("models.stoppers"):
+        try:
+            stopper_class = entry_point.load()
+            if not getattr(stopper_class, "web_configurable", False):
+                continue
+            params = {}
+            sig = inspect.signature(stopper_class.__init__)
+            param_info = getattr(stopper_class, "param_info",{})
+            for pname, param in sig.parameters.items():
+                if pname == "self":
+                    continue
+                annotation = param.annotation
+                if isinstance(annotation, (typing._GenericAlias, UnionType)):
+                    allowed = [t for t in typing.get_args(annotation)
+                                if t is not NoneType and t is not inspect.Parameter.empty]
+                    param_type = allowed[0] if allowed else str
+                else:
+                    param_type = annotation if annotation is not inspect.Parameter.empty else str
+                info = param_info.get(pname, {})
+                params[pname] = {
+                    "type": param_type.__name__,
+                    "default": param.default if param.default is not inspect.Parameter.empty else None,
+                    "label": info.get("label", pname),
+                    "helper_text": info.get("helper_text", ""),
+                }
+            available_stoppers[entry_point.name] = {
+                "label": getattr(stopper_class, "label", entry_point.name),
+                "params": params,
+            }
+        except Exception:
+            continue
+    return available_stoppers
+
+@bp.route("/stoppers", methods=["GET"])
+@login_required
+def api_list_web_configurable_stoppers():
+    """List web-configurable stoppers and their parameter schemas."""
+    return jsonify(get_web_configurable_stoppers())
+
 
 
 @bp.route("/projects/<project_id>/stopping", methods=["POST", "PUT"])
 @login_required
 @project_authorization
-def api_mutate_stopper(project):  # noqa: F401
-    """Mutate stopper of a project"""
-
-    from asreview.extensions import load_extension 
-    import inspect
-    import typing 
-    from types import UnionType
-
+def api_mutate_stopper(project):
+    """Mutate stopper of a project - only allows web configurable stoppers"""
     model_config = project.get_model_config()
     stopper_name = request.form.get("stopper")
-        #load user input params 
-    params = request.form.to_dict()
-    if "stopper" in params: 
-        del params['stopper']
-    if not stopper_name and "n" in params:
-        stopper_name = "n_consecutive_irrelevant"
-
-    if not stopper_name or stopper_name == "None":
+    if not stopper_name or stopper_name == "None": 
+        #no stopping rule set or set to none 
         model_config["stopper"] = None
         model_config["stopper_param"] = {}
         project.update_review(model=model_config)
         return api_get_stopper(project.project_id)
-
-
-
-    stopper_class = load_extension("models.stoppers", stopper_name)
-    if not getattr(stopper_class, "is_configurable", True):
-        return jsonify({"message": f"Stopper '{stopper_name}' is not configurable."}), 400
-
-    stopper_params = {}
-    sig = inspect.signature(stopper_class.__init__)
-    for k,v in params.items(): 
-        param_info = sig.parameters.get(k)
-        if not param_info: 
-            continue 
-        annotations = param_info.annotation
-
-        if isinstance(annotations, (typing._GenericAlias, UnionType)):
-            allowed_types = typing.get_args(annotations)
-        else:
-            allowed_types = (annotations,)
-        
-        type_validation = False
-        for target_type in allowed_types: 
-            if target_type is inspect.Parameter.empty or target_type is NoneType: 
-                continue
+    
+    web_configurable_stoppers = get_web_configurable_stoppers()
+    if stopper_name not in web_configurable_stoppers: 
+        return jsonify({"message": f"Stopper '{stopper_name}' is not available for web configuration."}), 400
+    else: 
+        params = request.form.to_dict()
+        schema = web_configurable_stoppers[stopper_name]["params"]
+        stopper_params = {} 
+        for k,v in params.items(): 
+            if k not in schema: 
+                if k == "stopper": 
+                    continue
+                else: 
+                    return jsonify({"message": f"Parameter '{k}' is not available for stopper '{stopper_name}'."}), 400 
+            target_type = {"int": int, "float": float, "str": str}[schema[k]["type"]]
             try:
                 stopper_params[k] = target_type(v)
-                type_validation = True
-                break
-            except (ValueError, TypeError): 
-                continue
+            except (ValueError, TypeError):
+                return jsonify({"message": f"Invalid value '{v}' for parameter '{k}'."}), 400
         
-        if not type_validation:
-            return jsonify({"message": f"Invalid value '{v}' for parameter '{k}'. Expected value of type: '{allowed_types}'"}), 400
-        
-    
-
-    model_config["stopper"] = stopper_name
-    model_config["stopper_param"] = stopper_params
-
+        model_config["stopper"] = stopper_name
+        model_config["stopper_param"] = stopper_params
     project.update_review(model=model_config)
-
     return api_get_stopper(project.project_id)
+
 
 
 

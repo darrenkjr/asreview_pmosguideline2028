@@ -14,7 +14,7 @@ import FinishSetup from "./ReviewPageTraining";
 import { useReviewSettings } from "context/ReviewSettingsContext";
 import StoppingReachedDialog from "./StoppingReachedDialog";
 import { projectStatuses } from "globals.js";
-import { Alert } from "@mui/material";
+import { Alert, Chip, Tooltip } from "@mui/material";
 
 const ReviewPage = () => {
   let { project_id } = useParams();
@@ -57,22 +57,51 @@ const ReviewPage = () => {
     );
   };
 
-  useQuery(["fetchStopping", { project_id }], ProjectAPI.fetchStopping, {
-    refetchOnWindowFocus: false,
-    onSuccess: (data) => {
-      const hasThreshold = Boolean(data?.params?.n);
-      if (
-        hasThreshold &&
-        data?.value >= data?.params?.n &&
-        data?.params?.n !== dismissedThresholdValue &&
-        statusData?.status !== projectStatuses.FINISHED &&
-        (dismissedThresholdValue === null ||
-          data?.params?.n > dismissedThresholdValue)
-      ) {
-        setShowStoppingDialog(true);
-      }
+  const { data: stoppingData } = useQuery(
+    ["fetchStopping", { project_id }],
+    ProjectAPI.fetchStopping,
+    {
+      refetchOnWindowFocus: false,
+      onSuccess: (data) => {
+        const hasThreshold = Boolean(data?.params?.n);
+        if (
+          hasThreshold &&
+          data?.value >= data?.params?.n &&
+          data?.params?.n !== dismissedThresholdValue &&
+          statusData?.status !== projectStatuses.FINISHED &&
+          (dismissedThresholdValue === null ||
+            data?.params?.n > dismissedThresholdValue)
+        ) {
+          setShowStoppingDialog(true);
+        }
+      },
     },
-  });
+  );
+
+  const isBuscar = stoppingData?.id === "statistical_buscarpy";
+  const pVal = stoppingData?.p ?? null;
+  const confidenceLevel = stoppingData?.params?.confidence_level ?? 0.95;
+  const isStoppingSuggested =
+    pVal !== null && pVal !== undefined && pVal < 1 - confidenceLevel;
+
+  const warmup = stoppingData?.params?.warmup ?? 20;
+  const nScreened = stoppingData?.n_screened ?? 0;
+  const decisionsToGo = warmup - nScreened;
+
+  let buscarText = "";
+  if (isBuscar) {
+    if (pVal === null || pVal === undefined) {
+      if (decisionsToGo > 0) {
+        buscarText = `BUSCAR: warming up (${decisionsToGo} decision${decisionsToGo !== 1 ? "s" : ""} to go)`;
+      } else {
+        buscarText = "BUSCAR: warming up (label more records)";
+      }
+    } else {
+      buscarText = `BUSCAR: p = ${pVal.toFixed(3)} (${
+        isStoppingSuggested ? "consider stopping" : "keep screening"
+      })`;
+    }
+  }
 
   let showBorder = useMediaQuery((theme) => theme.breakpoints.up("md"), {
     noSsr: true,
@@ -114,27 +143,48 @@ const ReviewPage = () => {
           )}
 
           {data?.status === "review" && data?.result !== null && (
-            <RecordCard
-              key={
-                "record-card-" +
-                project_id +
-                "-" +
-                data?.result?.record_id +
-                "-" +
-                JSON.stringify(data?.result?.tags_form)
-              }
-              project_id={project_id}
-              record={data?.result}
-              afterDecision={afterDecision}
-              fontSize={fontSize}
-              showBorder={showBorder}
-              modelLogLevel={modelLogLevel}
-              tagValues={tagValues}
-              setTagValues={setTagValues}
-              collapseAbstract={false}
-              hotkeys={true}
-              landscape={orientation === "landscape" && !landscapeDisabled}
-            />
+            <Stack spacing={2} sx={{ width: "100%" }}>
+              {isBuscar && (
+                <Tooltip
+                  title="p < 0.05 means there's less than a 5% chance fewer than 95% of relevant articles have been found. The decision to stop remains yours."
+                  arrow
+                >
+                  <Chip
+                    label={buscarText}
+                    size="small"
+                    color={
+                      pVal !== null && pVal !== undefined && isStoppingSuggested
+                        ? "success"
+                        : "default"
+                    }
+                    variant="outlined"
+                    sx={{ alignSelf: "flex-start", cursor: "help" }}
+                  />
+                </Tooltip>
+              )}
+
+              <RecordCard
+                key={
+                  "record-card-" +
+                  project_id +
+                  "-" +
+                  data?.result?.record_id +
+                  "-" +
+                  JSON.stringify(data?.result?.tags_form)
+                }
+                project_id={project_id}
+                record={data?.result}
+                afterDecision={afterDecision}
+                fontSize={fontSize}
+                showBorder={showBorder}
+                modelLogLevel={modelLogLevel}
+                tagValues={tagValues}
+                setTagValues={setTagValues}
+                collapseAbstract={false}
+                hotkeys={true}
+                landscape={orientation === "landscape" && !landscapeDisabled}
+              />
+            </Stack>
           )}
           {data?.status === "review" && data?.result === null && (
             <Stack spacing={3} sx={{ alignItems: "center" }}>

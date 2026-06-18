@@ -25,8 +25,9 @@ import {
   Snackbar,
   Stack,
   Typography,
+  TextField,
 } from "@mui/material";
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 
 import { ProjectAPI } from "api";
@@ -92,6 +93,10 @@ const ModelCard = ({ mode = null, trainNewModel = false, editable = true }) => {
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState("");
 
+  const [selectedStopper, setSelectedStopper] = useState("none");
+  const [stopperParams, setStopperParams] = useState({});
+  const [stopperError, setStopperError] = useState(null);
+
   const SNACKBAR_DURATION = 5000;
 
   const {
@@ -155,7 +160,51 @@ const ModelCard = ({ mode = null, trainNewModel = false, editable = true }) => {
     },
   );
 
-  const isLoading = isLoadingLearnerOptions || isLoadingModelConfig;
+  const {
+    data: stoppingData,
+    isLoading: isLoadingStopping,
+    error: errorStopping,
+  } = useQuery(
+    ["fetchStopping", { project_id: project_id }],
+    ProjectAPI.fetchStopping,
+    {
+      refetchOnWindowFocus: false,
+    },
+  );
+
+  const { data: stoppersSchema, isLoading: isLoadingStoppersSchema } = useQuery(
+    ["fetchStoppers"],
+    ProjectAPI.fetchWebConfigurableStoppers,
+    {
+      refetchOnWindowFocus: false,
+    },
+  );
+
+  const { mutate: mutateStopping } = useMutation(ProjectAPI.mutateStopping, {
+    onSucess: () => {
+      queryClient.invalidateQueries(["fetchStopping", { project_id }]);
+      setStopperError(null);
+      setSnackbarMessage("Stopping criterion updated");
+      setSnackbarOpen(true);
+    },
+    onError: (error) => {
+      setStopperError(error?.message || "Failed to update stopping criterion");
+    },
+  });
+
+  useEffect(() => {
+    if (!stoppingData || !stoppersSchema) return;
+    if (stoppingData.name === null && !stoppingData.id) {
+      setSelectedStopper("none");
+      setStopperParams({});
+    } else if (stoppersSchema[stoppingData.id]) {
+      setSelectedStopper(stoppingData.id);
+      setStopperParams(stoppingData.params ?? {});
+    }
+  }, [stoppingData, stoppersSchema]);
+
+  const isLoading =
+    isLoadingLearnerOptions || isLoadingModelConfig || isLoadingStoppersSchema;
   const error = errorLearnerOptions || errorModelConfig;
 
   const handlePopoverOpen = (event) => {
@@ -489,6 +538,129 @@ const ModelCard = ({ mode = null, trainNewModel = false, editable = true }) => {
                     </>
                   )}
                 </FormControl>
+                {/* Configure Stopping Criteria */}
+                <Divider sx={{ my: 3 }} />
+                <Typography
+                  variant="subtitle1"
+                  fontWeight="bold"
+                  sx={{ mb: 2 }}
+                >
+                  Configure Stopping Criterion
+                </Typography>
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel id="stop-criterion-label">
+                    Stopping Criterion
+                  </InputLabel>
+                  <Select
+                    labelId="stop-criterion-label"
+                    id="select-stop-criterion"
+                    value={selectedStopper}
+                    label="Stopping Criterion"
+                    disabled={!editable}
+                    onChange={(event) => {
+                      const newStopper = event.target.value;
+                      setSelectedStopper(newStopper);
+                      setStopperError(null);
+
+                      const defaultParams = {};
+                      // prepopulate
+                      if (
+                        newStopper !== "none" &&
+                        stoppersSchema?.[newStopper]?.params
+                      ) {
+                        Object.entries(
+                          stoppersSchema[newStopper].params,
+                        ).forEach(([paramName, paramVal]) => {
+                          defaultParams[paramName] = paramVal.default;
+                        });
+                      }
+                      setStopperParams(defaultParams);
+                      mutateStopping({
+                        project_id,
+                        stopper: newStopper === "none" ? "None" : newStopper,
+                        ...defaultParams,
+                      });
+                    }}
+                  >
+                    <MenuItem value="none">None</MenuItem>
+                    {stoppersSchema &&
+                      Object.entries(stoppersSchema).map(([key, stopper]) => (
+                        <MenuItem key={key} value={key}>
+                          {stopper?.label}
+                        </MenuItem>
+                      ))}
+                  </Select>
+                </FormControl>
+                {selectedStopper !== "none" &&
+                  stoppersSchema?.[selectedStopper] && (
+                    <Stack spacing={2} sx={{ mb: 2 }}>
+                      {Object.entries(
+                        stoppersSchema[selectedStopper].params,
+                      ).map(([paramName, paramInfo]) => {
+                        const paramType = paramInfo.type;
+                        const step = paramType === "float" ? 0.01 : 1;
+
+                        return (
+                          <TextField
+                            key={paramName}
+                            label={paramInfo.label || paramName}
+                            type="number"
+                            inputProps={{ step: step }}
+                            helperText={paramInfo.helper_text || ""}
+                            value={stopperParams[paramName] ?? ""}
+                            fullWidth
+                            disabled={!editable}
+                            onChange={(event) => {
+                              const rawValue = event.target.value;
+                              if (rawValue === "") {
+                                setStopperParams((prev) => ({
+                                  ...prev,
+                                  [paramName]: "",
+                                }));
+                              } else {
+                                const parsedValue =
+                                  paramType === "float"
+                                    ? parseFloat(rawValue)
+                                    : parseInt(rawValue, 10);
+                                if (!isNaN(parsedValue)) {
+                                  const updated = {
+                                    ...stopperParams,
+                                    [paramName]: parsedValue,
+                                  };
+                                  setStopperParams(updated);
+                                  mutateStopping({
+                                    project_id,
+                                    stopper: selectedStopper,
+                                    ...updated,
+                                  });
+                                }
+                              }
+                            }}
+                            onBlur={() => {
+                              if (
+                                stopperParams[paramName] === "" ||
+                                stopperParams[paramName] === undefined
+                              ) {
+                                const fallbackValue =
+                                  stoppingData?.params?.[paramName] ??
+                                  paramInfo.default;
+                                setStopperParams((prev) => ({
+                                  ...prev,
+                                  [paramName]: fallbackValue,
+                                }));
+                              }
+                            }}
+                          />
+                        );
+                      })}
+                    </Stack>
+                  )}
+
+                {stopperError && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {stopperError}
+                  </Alert>
+                )}
               </>
             ) : null}
           </>

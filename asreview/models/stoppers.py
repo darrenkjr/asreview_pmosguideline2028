@@ -81,6 +81,7 @@ class LastRelevant(BaseEstimator):
     """
 
     is_configurable = False
+    web_configurable = False
 
     name = "last_relevant"
     label = "Last Relevant"
@@ -126,6 +127,7 @@ class NLabeled(BaseEstimator):
 
     name = "n_labeled"
     label = "N Labeled"
+    web_configurable = False
 
     def __init__(self, n: int | tuple[int, int]):
         self.n = n
@@ -183,6 +185,13 @@ class QuantileLabeled(BaseEstimator):
     name = "q_labeled"
     label = "Quantile Labeled"
     is_configurable = True
+    web_configurable = False
+    param_info = {
+        "quantile": {
+            "label": "Quantile",
+            "helper_text": "Quantile of records to label before stopping the review (in decimals)"
+        }
+    }
 
     def __init__(self, quantile: float):
         self.quantile = quantile
@@ -237,6 +246,13 @@ class NConsecutiveIrrelevant(BaseEstimator):
     name = "n_consecutive_irrelevant"
     label = "N Consecutive Irrelevant"
     is_configurable = True
+    web_configurable = True
+    param_info = {
+        "n": {
+            "label" : "Number of irrelevant records in a row to stop the review at", 
+            "helper_text" : ""
+        }
+    }
 
     def __init__(self, n: int = 100):
         self.n = n
@@ -302,6 +318,29 @@ class StatisticalBuscarpy(BaseEstimator):
     name = "statistical_buscarpy"
     label = "Statistical Buscarpy"
     is_configurable = True
+    web_configurable = True
+    param_info = {
+        "recall_target": {
+            "label": "Recall target",
+            "helper_text": "Target recall or sensitivity rate in decimals."
+        },
+        "confidence_level": {
+            "label": "Confidence threshold",
+            "helper_text": "Confidence level for when to suggest to stop screening."
+        },
+        "bias": {
+            "label": "Bias",
+            "helper_text": "Bias parameter denoting likelihood of sampling a relevant record relative to an irrelevant record. Default is 1.0, denoting sampling is in random order (conservative assumption). Values >1.0 imply relevant records are more likely to be sampled (e.g., due to AI ordering)."
+        },
+        "eval_every": {
+            "label": "Evaluation Interval",
+            "helper_text": "Number of records in an interval to screen before evaluating whether to stop"
+        },
+        "warmup": {
+            "label": "Warmup Period",
+            "helper_text": "Number of records to screen before evaluation begins"
+        }
+    }
     
     def __init__(
         self, 
