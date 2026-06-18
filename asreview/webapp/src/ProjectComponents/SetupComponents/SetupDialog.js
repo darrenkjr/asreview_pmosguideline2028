@@ -192,7 +192,7 @@ const SetupDialog = ({ project_id, mode, open, onClose }) => {
 
                   <Box sx={{ textAlign: "center", my: 2 }}>
                     <Button onClick={() => setShowSettings(!showSettings)}>
-                      {showSettings ? "Show dataset" : "Show options"}
+                      {showSettings ? "Show dataset" : "Set up review"}
                     </Button>
                   </Box>
                   <Collapse in={showSettings} mountOnEnter>

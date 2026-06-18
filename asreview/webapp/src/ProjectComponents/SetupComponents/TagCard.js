@@ -220,10 +220,17 @@ const MutateGroupDialog = ({ project_id, open, onClose, group = null }) => {
   const queryClient = useQueryClient();
   const smallScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const [state, setState] = React.useState(
-    group || {
+  const [state, setState] = React.useState(() => {
+    if (group) {
+      return {
+        min_selection: 0,
+        ...group,
+      };
+    }
+    return {
       label: "",
       export: "",
+      min_selection: 0,
       values: [
         {
           label: "",
@@ -238,8 +245,8 @@ const MutateGroupDialog = ({ project_id, open, onClose, group = null }) => {
           export: "",
         },
       ],
-    },
-  );
+    };
+  });
 
   const { mutate: createTagGroup, error: createError } = useMutation(
     ProjectAPI.createTagGroup,
@@ -284,6 +291,14 @@ const MutateGroupDialog = ({ project_id, open, onClose, group = null }) => {
     }));
   };
 
+  const handleMinSelectionChange = (e) => {
+    const value = Math.max(0, parseInt(e.target.value, 20) || 0);
+    setState((prev) => ({
+      ...prev,
+      min_selection: value,
+    }));
+  };
+
   const handleTagLabelChange = (index, e) => {
     setState((prev) => ({
       ...prev,
@@ -321,11 +336,42 @@ const MutateGroupDialog = ({ project_id, open, onClose, group = null }) => {
     }));
   };
 
+  const BulkImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const lines = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      const newTags = lines.map((line) => ({
+        label: line,
+        export: labelToExport(line),
+      }));
+
+      setState((prev) => {
+        const filteredExisting = prev.values.filter(
+          (tag) => tag.label || tag.export,
+        );
+        return {
+          ...prev,
+          values: [...filteredExisting, ...newTags],
+        };
+      });
+      e.target.value = null;
+    };
+    reader.readAsText(file);
+  };
+
   const closeDialog = () => {
     if (group == null) {
       setState({
         label: "",
         export: "",
+        min_selection: 0,
         values: [
           {
             label: "",
@@ -397,6 +443,18 @@ const MutateGroupDialog = ({ project_id, open, onClose, group = null }) => {
             />
           </Stack>
         </Stack>
+        <TextField
+          fullWidth
+          type="number"
+          id="group-min-selection"
+          label="Minimum selections required for Relevance*"
+          value={state.min_selection ?? 0}
+          onChange={handleMinSelectionChange}
+          inputProps={{ min: 0 }}
+          helperText="*For guideline workflows, marking an article as relevant requires an assignment to particular topics. This sets the minimum number of topics that need to be assigned to a record before it is marked as relevant to the guideline as a whole (0 to disable)."
+          sx={{ mb: 3 }}
+        />
+
         <Stack spacing={3}>
           <TypographySubtitle1Medium>Tags</TypographySubtitle1Medium>
           {state.values.map((tag, index) => (
@@ -420,15 +478,30 @@ const MutateGroupDialog = ({ project_id, open, onClose, group = null }) => {
         </Stack>
         <Stack
           direction="row"
-          justifyContent="flex-end"
-          alignItems="baseline"
+          justifyContent="space-between"
+          alignItems="center"
           spacing={2}
+          sx={{ mt: 3 }}
         >
           <Tooltip title="Add tag">
             <IconButton aria-label="add tag" onClick={addTag}>
               <Add />
             </IconButton>
           </Tooltip>
+          <Button
+            variant="outlined"
+            component="label"
+            size="small"
+            startIcon={<FolderOpenIcon />}
+          >
+            Bulk Import Topics
+            <input
+              type="file"
+              accept=".csv,.txt"
+              hidden
+              onChange={BulkImport}
+            />
+          </Button>
         </Stack>
 
         {mutateError && (
