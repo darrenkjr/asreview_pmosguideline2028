@@ -160,11 +160,7 @@ const ModelCard = ({ mode = null, trainNewModel = false, editable = true }) => {
     },
   );
 
-  const {
-    data: stoppingData,
-    isLoading: isLoadingStopping,
-    error: errorStopping,
-  } = useQuery(
+  const { data: stoppingData } = useQuery(
     ["fetchStopping", { project_id: project_id }],
     ProjectAPI.fetchStopping,
     {

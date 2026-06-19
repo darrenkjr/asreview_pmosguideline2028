@@ -622,7 +622,7 @@ class ProjectAPI {
   static mutateStopping(variables) {
     let body = new FormData();
     Object.entries(variables).forEach(([key, value]) => {
-      if (key != "project_id" && value !== undefined) {
+      if (key !== "project_id" && value !== undefined) {
         body.set(key, value);
       }
     });
