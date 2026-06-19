@@ -38,7 +38,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: docker/metadata-action@v4
         with:
-          images: ghcr.io/asreview/asreview
+          images: ghcr.io/${{ github.repository_owner }}/asreview_pmosguideline2028
       - name: Login to GitHub registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v2
@@ -52,5 +52,5 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }},ghcr.io/asreview/asreview:latest
+          tags: ${{ steps.meta.outputs.tags }},ghcr.io/${{ github.repository_owner }}/asreview_pmosguideline2028:latest
           labels: ${{ steps.meta.outputs.labels }}
