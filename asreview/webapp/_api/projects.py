@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from sqlalchemy.util import NoneType
+from types import NoneType, UnionType
 import base64
 import hashlib
 import hmac
@@ -1349,19 +1349,9 @@ def api_get_stopper(project):  # noqa: F401
         data = db.input[["record_id"]]
     labels = results["label"]
 
-    if len(labels) > 0:
-        if int(sum(labels == 1)) > 0:
-            last_relevant_index = len(labels) - 1 - np.argmax(labels[::-1] == 1)
-            n_since_last_relevant = int(sum(labels[last_relevant_index + 1 :] == 0))
-        else:
-            n_since_last_relevant = int(sum(labels == 0))
-    else:
-        n_since_last_relevant = 0
-
     response_dict = {
             "id": stopper.name,
             "params": stopper.get_params(),
-            "value": n_since_last_relevant,
             "stop": bool(stopper.stop(results, data)),
         }
 
@@ -1373,6 +1363,18 @@ def api_get_stopper(project):  # noqa: F401
         response_dict["p"] = eval_results["p"]
         response_dict["reason"] = eval_results["reason"]
         response_dict["n_screened"] = n_screened
+    
+    if isinstance(stopper, NConsecutiveIrrelevant): 
+        if len(labels) > 0:
+            if int(sum(labels == 1)) > 0:
+                last_relevant_index = len(labels) - 1 - np.argmax(labels[::-1] == 1)
+                n_since_last_relevant = int(sum(labels[last_relevant_index + 1 :] == 0))
+            else:
+                n_since_last_relevant = int(sum(labels == 0))
+        else:
+            n_since_last_relevant = 0
+        
+        response_dict["value"] = n_since_last_relevant
 
     return jsonify(response_dict)
 
