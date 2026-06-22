@@ -1381,7 +1381,6 @@ def api_get_stopper(project):  # noqa: F401
 def get_web_configurable_stoppers(): 
     import inspect
     import typing
-    from types import NoneType, UnionType
 
     available_stoppers = {}
     for entry_point in extensions("models.stoppers"):

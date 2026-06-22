@@ -23,6 +23,8 @@ import {
   Tooltip,
   Typography,
   Alert,
+  Chip,
+  Autocomplete,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import React from "react";
@@ -141,6 +143,69 @@ const NoteDialog = ({ project_id, record_id, open, onClose, note = null }) => {
   );
 };
 
+const renderRecommendedTopics = (
+  group,
+  selectedValues,
+  onSelect,
+  disabled = false,
+) => {
+  const recommended = group.values.slice(0, 5);
+  if (disabled || recommended.length === 0) return null;
+
+  return (
+    <Box sx={{ mb: 2 }}>
+      <Typography
+        variant="subtitle2"
+        color="text.secondary"
+        sx={{ mb: 1, fontWeight: "bold" }}
+      >
+        Recommended Topics
+      </Typography>
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        {recommended.map((tag) => {
+          const isSelected = selectedValues.some(
+            (selected) => selected.id === tag.id,
+          );
+          return (
+            <Tooltip
+              key={`rec-${group.id}-${tag.id}`}
+              title={tag.label}
+              enterDelay={500}
+            >
+              <Chip
+                label={tag.label}
+                variant={isSelected ? "filled" : "outlined"}
+                color={isSelected ? "primary" : "default"}
+                onClick={() => {
+                  if (!isSelected) {
+                    onSelect(tag);
+                  }
+                }}
+                disabled={isSelected}
+                sx={{
+                  height: "auto",
+                  cursor: isSelected ? "default" : "pointer",
+                  opacity: isSelected ? 0.6 : 1,
+                  transition: "all 0.2s ease-in-out",
+                  "& .MuiChip-label": {
+                    display: "block",
+                    whiteSpace: "normal",
+                    wordBreak: "break-word",
+                    py: 0.5,
+                  },
+                  "&:hover": {
+                    transform: isSelected ? "none" : "scale(1.05)",
+                  },
+                }}
+              />
+            </Tooltip>
+          );
+        })}
+      </Stack>
+    </Box>
+  );
+};
+
 const TagsDialog = ({
   project_id,
   record_id,
@@ -156,39 +221,97 @@ const TagsDialog = ({
   const [localTagValues, setLocalTagValues] = React.useState(
     mergeTagValues(tagsForm, tagValues),
   );
+  const [showConfirmEmpty, setShowConfirmEmpty] = React.useState(false);
+  const [showConfirmRelevant, setShowConfirmRelevant] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
       setLocalTagValues(mergeTagValues(tagsForm, tagValues));
+      setShowConfirmEmpty(false);
+      setShowConfirmRelevant(false);
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleTagValueChange = (isChecked, groupId, tagId) => {
+  const isLocalAnyChecked =
+    localTagValues?.some((group) => group.values.some((tag) => tag.checked)) ??
+    false;
+
+  const handleAutoCompleteChange = (groupId, newSelectedTags) => {
     let groupI = localTagValues.findIndex((group) => group.id === groupId);
     if (groupI === -1) return;
-    let tagI = localTagValues[groupI].values.findIndex(
-      (tag) => tag.id === tagId,
-    );
-    if (tagI === -1) return;
     let copy = structuredClone(localTagValues);
-    copy[groupI].values[tagI]["checked"] = isChecked;
+    copy[groupI].values = copy[groupI].values.map((tag) => {
+      const isSelected = newSelectedTags.some(
+        (selected) => selected.id === tag.id,
+      );
+      return { ...tag, checked: isSelected };
+    });
     setLocalTagValues(copy);
+    setShowConfirmEmpty(false);
   };
 
   const { isError, isLoading, mutate } = useMutation(
     ProjectAPI.mutateClassification,
     {
-      onSuccess: () => {
+      onSuccess: (data, variables) => {
         queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
-        onSave(localTagValues);
+        queryClient.invalidateQueries(["fetchProjectStatus", { project_id }]);
+        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
+        onSave(variables.tagValues);
         onClose();
       },
     },
   );
 
+  const handleSave = () => {
+    if (!isLocalAnyChecked) {
+      setShowConfirmEmpty(true);
+      return;
+    }
+    if (label === 0) {
+      setShowConfirmRelevant(true);
+      return;
+    }
+    mutate({
+      project_id,
+      record_id,
+      label,
+      tagValues: localTagValues,
+      retrain_model: retrainAfterDecision,
+      post: false,
+    });
+  };
+
+  const handleConfirmRelevant = () => {
+    mutate({
+      project_id,
+      record_id,
+      label: 1,
+      tagValues: localTagValues,
+      retrain_model: retrainAfterDecision,
+      post: false,
+    });
+    setShowConfirmRelevant(false);
+  };
+
+  const handleConfirmNotRelevant = () => {
+    const clearedTags = structuredClone(localTagValues).map((group) => ({
+      ...group,
+      values: group.values.map((tag) => ({ ...tag, checked: false })),
+    }));
+    mutate({
+      project_id,
+      record_id,
+      label: 0,
+      tagValues: clearedTags,
+      retrain_model: retrainAfterDecision,
+      post: false,
+    });
+  };
+
   return (
     <Dialog open={open} onClose={onClose} fullWidth>
-      <DialogTitle>Edit tags</DialogTitle>
+      <DialogTitle>Edit guideline topic assignment</DialogTitle>
       <DialogContent>
         <Grid container spacing={2} columns={2} sx={{ pt: 1 }}>
           {tagsForm &&
@@ -196,29 +319,85 @@ const TagsDialog = ({
               <Grid size={2} key={group.id}>
                 <Stack direction="column" spacing={1}>
                   <Typography variant="h6">{group.label}</Typography>
-                  <FormGroup row={false}>
-                    {group.values.map((tag, j) => (
-                      <FormControlLabel
-                        key={`${group.id}:${tag.id}`}
-                        control={
-                          <Checkbox
-                            checked={
-                              localTagValues[i]?.values[j]?.checked || false
-                            }
-                            onChange={(e) =>
-                              handleTagValueChange(
-                                e.target.checked,
-                                group.id,
-                                tag.id,
-                              )
-                            }
-                            disabled={isLoading}
-                          />
-                        }
-                        label={tag.label}
+                  {renderRecommendedTopics(
+                    group,
+                    localTagValues[i]?.values.filter((t) => t.checked) || [],
+                    (tag) => {
+                      const currentSelected =
+                        localTagValues[i]?.values.filter((t) => t.checked) ||
+                        [];
+                      handleAutocompleteChange(group.id, [
+                        ...currentSelected,
+                        tag,
+                      ]);
+                    },
+                  )}
+                  <Autocomplete
+                    multiple
+                    id={`tags-autocomplete-${group.id}`}
+                    options={group.values}
+                    getOptionLabel={(option) => option.label}
+                    isOptionEqualToValue={(option, val) => option.id === val.id}
+                    value={
+                      localTagValues[i]?.values.filter((t) => t.checked) || []
+                    }
+                    onChange={(event, newValue) => {
+                      handleAutocompleteChange(group.id, newValue);
+                    }}
+                    renderTags={(value, getTagProps) =>
+                      value.map((option, index) => {
+                        const { key, ...tagProps } = getTagProps({ index });
+                        return (
+                          <Tooltip
+                            key={key}
+                            title={option.label}
+                            enterDelay={500}
+                          >
+                            <Chip
+                              variant="outlined"
+                              label={option.label}
+                              {...tagProps}
+                              sx={{
+                                height: "auto",
+                                maxWidth: "100%",
+                                "& .MuiChip-label": {
+                                  display: "block",
+                                  whiteSpace: "normal",
+                                  wordBreak: "break-word",
+                                  py: 0.5,
+                                },
+                              }}
+                            />
+                          </Tooltip>
+                        );
+                      })
+                    }
+                    renderOption={(props, option) => {
+                      const { key, ...optionProps } = props;
+                      return (
+                        <Box
+                          component="li"
+                          key={key}
+                          {...optionProps}
+                          sx={{
+                            whiteSpace: "normal",
+                            wordBreak: "break-word",
+                          }}
+                        >
+                          {option.label}
+                        </Box>
+                      );
+                    }}
+                    renderInput={(params) => (
+                      <TextField
+                        {...params}
+                        variant="outlined"
+                        label={`Select ${group.label}`}
+                        placeholder="Search guideline topics..."
                       />
-                    ))}
-                  </FormGroup>
+                    )}
+                    disabled={isLoading}
+                  />
                 </Stack>
               </Grid>
             ))}
@@ -233,23 +412,74 @@ const TagsDialog = ({
         <Button onClick={onClose} color="primary">
           Cancel
         </Button>
-        <Button
-          onClick={() =>
-            mutate({
-              project_id,
-              record_id,
-              label,
-              tagValues: localTagValues,
-              retrain_model: retrainAfterDecision,
-              post: false,
-            })
-          }
-          color="primary"
-          disabled={isLoading}
-        >
+        <Button onClick={handleSave} color="primary" disabled={isLoading}>
           Save
         </Button>
       </DialogActions>
+
+      <Dialog
+        open={showConfirmEmpty}
+        onClose={() => setShowConfirmEmpty(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Confirm Topic Removal</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="body1">
+              No topic is assigned to this record.
+            </Typography>
+            <Alert severity="warning">
+              Saving with no topics will mark this record as{" "}
+              <strong>not relevant</strong>.
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowConfirmEmpty(false)}>Cancel</Button>
+          <Button
+            onClick={() => {
+              setShowConfirmEmpty(false);
+              handleConfirmNotRelevant();
+            }}
+            variant="contained"
+            color="warning"
+            disabled={isLoading}
+          >
+            Confirm
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={showConfirmRelevant}
+        onClose={() => setShowConfirmRelevant(false)}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Confirm Topic Reassignments</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="body1">
+              No topic was previously assigned to this record.
+            </Typography>
+            <Alert severity="info">
+              Saving these topic assignments will mark this record as{" "}
+              <strong>relevant</strong>.
+            </Alert>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowConfirmRelevant(false)}>Cancel</Button>
+          <Button
+            onClick={handleConfirmRelevant}
+            variant="contained"
+            color="primary"
+            disabled={isLoading}
+          >
+            Confirm
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 };
@@ -271,6 +501,7 @@ const RecordCardLabeler = ({
   retrainAfterDecision = true,
   changeDecision = true,
 }) => {
+  const queryClient = useQueryClient();
   const [editState] = useToggle(!(label === 1 || label === 0));
   const [showNotesDialog, toggleShowNotesDialog] = useToggle(false);
   const [showTagsDialog, toggleShowTagsDialog] = useToggle(false);
@@ -282,6 +513,9 @@ const RecordCardLabeler = ({
     ProjectAPI.mutateClassification,
     {
       onSuccess: () => {
+        queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
+        queryClient.invalidateQueries(["fetchProjectStatus", { project_id }]);
+        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
         if (onDecisionClose) {
           onDecisionClose();
         }
@@ -289,17 +523,27 @@ const RecordCardLabeler = ({
     },
   );
 
-  const handleTagValueChange = (isChecked, groupId, tagId) => {
+  const hasTags = Array.isArray(tagsForm) && tagsForm.length > 0;
+  const isAnyTagChecked =
+    tagValuesState?.some((group) => group.values?.some((tag) => tag.checked)) ??
+    false;
+  const isRelevantDisabled =
+    isLoading || isSuccess || (hasTags && !isAnyTagChecked);
+  const [dialogLabel, setDialogLabel] = React.useState(label);
+  const [showConfirmNotRelevant, setShowConfirmNotRelevant] =
+    React.useState(false);
+
+  const handleInlineAutocompleteChange = (groupId, newSelectedTags) => {
     let groupI = tagValuesState.findIndex((group) => group.id === groupId);
     if (groupI === -1) return;
-    let tagI = tagValuesState[groupI].values.findIndex(
-      (tag) => tag.id === tagId,
-    );
-    if (tagI === -1) return;
 
     let tagValuesCopy = structuredClone(tagValuesState);
-    tagValuesCopy[groupI].values[tagI]["checked"] = isChecked;
-
+    tagValuesCopy[groupI].values = tagValuesCopy[groupI].values.map((tag) => {
+      const isSelected = newSelectedTags.some(
+        (selected) => selected.id === tag.id,
+      );
+      return { ...tag, checked: isSelected };
+    });
     setTagValuesState(tagValuesCopy);
   };
 
@@ -312,6 +556,57 @@ const RecordCardLabeler = ({
       retrain_model: retrainAfterDecision,
       post: editState,
     });
+  };
+
+  const handleConfirmChangeToNotRelevant = () => {
+    const clearedTags = structuredClone(tagValuesState).map((group) => ({
+      ...group,
+      values: group.values.map((tag) => ({ ...tag, checked: false })),
+    }));
+    setTagValuesState(clearedTags);
+    mutate({
+      project_id: project_id,
+      record_id: record_id,
+      label: 0,
+      tagValues: clearedTags,
+      retrain_model: retrainAfterDecision,
+      post: editState,
+    });
+    setShowConfirmNotRelevant(false);
+  };
+
+  const handleChangeDecision = () => {
+    if (label === 1) {
+      if (hasTags && isAnyTagChecked) {
+        setShowConfirmNotRelevant(true);
+      } else {
+        // Relevant → Not Relevant: clear all topic assignments and save
+        const clearedTags = hasTags
+          ? structuredClone(tagValuesState).map((group) => ({
+              ...group,
+              values: group.values.map((tag) => ({ ...tag, checked: false })),
+            }))
+          : tagValuesState;
+        setTagValuesState(clearedTags);
+        mutate({
+          project_id: project_id,
+          record_id: record_id,
+          label: 0,
+          tagValues: clearedTags,
+          retrain_model: retrainAfterDecision,
+          post: editState,
+        });
+      }
+    } else {
+      // Not Relevant → Relevant: prompt for topic selection if tags configured
+      if (hasTags) {
+        setDialogLabel(1);
+        toggleShowTagsDialog();
+      } else {
+        makeDecision(1);
+      }
+    }
+    setAnchorEl(null);
   };
 
   const [anchorEl, setAnchorEl] = React.useState(null);
@@ -343,7 +638,7 @@ const RecordCardLabeler = ({
       })}
     >
       <Box>
-        {Array.isArray(tagsForm) && tagsForm.length > 0 && (
+        {hasTags && (
           <CardContent>
             <Grid container spacing={2} columns={2}>
               {tagsForm &&
@@ -360,34 +655,97 @@ const RecordCardLabeler = ({
                   >
                     <Stack direction="column" spacing={1}>
                       <Typography variant="h6">{group.label}</Typography>
-                      <FormGroup row={false}>
-                        {group.values.map((tag, j) => (
-                          <FormControlLabel
-                            key={`${group.id}:${tag.id}`}
-                            control={
-                              <Checkbox
-                                checked={
-                                  tagValuesState[i]?.values[j]?.checked || false
-                                }
-                                onChange={(e) => {
-                                  handleTagValueChange(
-                                    e.target.checked,
-                                    group.id,
-                                    tag.id,
-                                  );
-                                }}
-                                disabled={
-                                  !editState ||
-                                  !changeDecision ||
-                                  isLoading ||
-                                  isSuccess
-                                }
-                              />
-                            }
-                            label={tag.label}
+
+                      {renderRecommendedTopics(
+                        group,
+                        tagValuesState[i]?.values.filter((t) => t.checked) ||
+                          [],
+                        (tag) => {
+                          const currentSelected =
+                            tagValuesState[i]?.values.filter(
+                              (t) => t.checked,
+                            ) || [];
+                          handleInlineAutocompleteChange(group.id, [
+                            ...currentSelected,
+                            tag,
+                          ]);
+                        },
+                        !editState || !changeDecision || isLoading || isSuccess,
+                      )}
+                      <Autocomplete
+                        multiple
+                        id={`inline-tags-autocomplete-${group.id}`}
+                        options={group.values}
+                        getOptionLabel={(option) => option.label}
+                        isOptionEqualToValue={(option, val) =>
+                          option.id === val.id
+                        }
+                        value={
+                          tagValuesState[i]?.values.filter((t) => t.checked) ||
+                          []
+                        }
+                        onChange={(event, newValue) => {
+                          handleInlineAutocompleteChange(group.id, newValue);
+                        }}
+                        renderTags={(value, getTagProps) =>
+                          value.map((option, index) => {
+                            const { key, ...tagProps } = getTagProps({ index });
+                            return (
+                              <Tooltip
+                                key={key}
+                                title={option.label}
+                                enterDelay={500}
+                              >
+                                <Chip
+                                  variant="outlined"
+                                  label={option.label}
+                                  {...tagProps}
+                                  sx={{
+                                    height: "auto",
+                                    maxWidth: "100%",
+                                    "& .MuiChip-label": {
+                                      display: "block",
+                                      whiteSpace: "normal",
+                                      wordBreak: "break-word",
+                                      py: 0.5,
+                                    },
+                                  }}
+                                />
+                              </Tooltip>
+                            );
+                          })
+                        }
+                        renderOption={(props, option) => {
+                          const { key, ...optionProps } = props;
+                          return (
+                            <Box
+                              component="li"
+                              key={key}
+                              {...optionProps}
+                              sx={{
+                                whiteSpace: "normal",
+                                wordBreak: "break-word",
+                              }}
+                            >
+                              {option.label}
+                            </Box>
+                          );
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            variant="outlined"
+                            label={`Select ${group.label}`}
+                            placeholder="Search topics..."
                           />
-                        ))}
-                      </FormGroup>
+                        )}
+                        disabled={
+                          !editState ||
+                          !changeDecision ||
+                          isLoading ||
+                          isSuccess
+                        }
+                      />
                     </Stack>
                   </Grid>
                 ))}
@@ -609,7 +967,7 @@ const RecordCardLabeler = ({
               >
                 {/* toggle label */}
                 {(label === 1 || label === 0) && (
-                  <MenuItem onClick={() => makeDecision(label === 1 ? 0 : 1)}>
+                  <MenuItem onClick={handleChangeDecision}>
                     <ListItemIcon>
                       {label === 1 ? (
                         <NotInterestedOutlinedIcon />
@@ -626,9 +984,10 @@ const RecordCardLabeler = ({
                     />
                   </MenuItem>
                 )}
-                {Array.isArray(tagsForm) && tagsForm.length > 0 && (
+                {hasTags && (
                   <MenuItem
                     onClick={() => {
+                      setDialogLabel(label);
                       toggleShowTagsDialog();
                       setAnchorEl(null);
                     }}
@@ -636,7 +995,7 @@ const RecordCardLabeler = ({
                     <ListItemIcon>
                       <LabelOutlined />
                     </ListItemIcon>
-                    <ListItemText primary="Edit tags" />
+                    <ListItemText primary="Edit topic assignment" />
                   </MenuItem>
                 )}
                 <MenuItem
@@ -669,11 +1028,11 @@ const RecordCardLabeler = ({
             onClose={toggleShowNotesDialog}
             note={note}
           />
-          {Array.isArray(tagsForm) && tagsForm.length > 0 && (
+          {hasTags && (
             <TagsDialog
               project_id={project_id}
               record_id={record_id}
-              label={label}
+              label={dialogLabel}
               tagsForm={tagsForm}
               tagValues={tagValuesState}
               retrainAfterDecision={retrainAfterDecision}
@@ -682,6 +1041,37 @@ const RecordCardLabeler = ({
               onSave={setTagValuesState}
             />
           )}
+          <Dialog
+            open={showConfirmNotRelevant}
+            onClose={() => setShowConfirmNotRelevant(false)}
+            maxWidth="xs"
+            fullWidth
+          >
+            <DialogTitle>Confirm Relevance Change</DialogTitle>
+            <DialogContent>
+              <Stack spacing={2} sx={{ mt: 1 }}>
+                <Typography variant="body1">
+                  Are you sure you want to mark this record as not relevant?
+                </Typography>
+                <Alert severity="warning">
+                  This will remove all assigned topics from this record.
+                </Alert>
+              </Stack>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setShowConfirmNotRelevant(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmChangeToNotRelevant}
+                variant="contained"
+                color="warning"
+                disabled={isLoading}
+              >
+                Confirm
+              </Button>
+            </DialogActions>
+          </Dialog>
         </CardActions>
       </Box>
     </Stack>
