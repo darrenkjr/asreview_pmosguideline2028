@@ -1440,7 +1440,7 @@ def api_mutate_stopper(project):
     
     web_configurable_stoppers = get_web_configurable_stoppers()
     if stopper_name not in web_configurable_stoppers: 
-        return jsonify({"message": f"Stopper '{stopper_name}' is not available for web configuration."}), 400
+        return jsonify({"message": f"Stopper '{stopper_name}' is not configurable."}), 400
     else: 
         params = request.form.to_dict()
         schema = web_configurable_stoppers[stopper_name]["params"]
