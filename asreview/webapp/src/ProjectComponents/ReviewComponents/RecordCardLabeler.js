@@ -839,7 +839,7 @@ const RecordCardLabeler = ({
                   onClick={() => makeDecision(1)}
                   variant="contained"
                   startIcon={<LibraryAddOutlinedIcon />}
-                  disabled={(disabled = { isRelevantDisabled })}
+                  disabled={isRelevantDisabled}
                   sx={(theme) => ({
                     color: theme.palette.getContrastText(
                       theme.palette.tertiary.main,
