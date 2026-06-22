@@ -3,14 +3,11 @@ import {
   Button,
   CardActions,
   CardContent,
-  Checkbox,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   Divider,
-  FormControlLabel,
-  FormGroup,
   Grid2 as Grid,
   IconButton,
   ListItemIcon,
@@ -612,7 +609,7 @@ const RecordCardLabeler = ({
   const [anchorEl, setAnchorEl] = React.useState(null);
   const openMenu = Boolean(anchorEl);
 
-  useHotkeys("r", () => hotkeys && !isLoading && !isSuccess && makeDecision(1));
+  useHotkeys("r", () => hotkeys && !isRelevantDisabled && makeDecision(1));
   useHotkeys("i", () => hotkeys && !isLoading && !isSuccess && makeDecision(0));
   useHotkeys(
     "n",
@@ -842,7 +839,7 @@ const RecordCardLabeler = ({
                   onClick={() => makeDecision(1)}
                   variant="contained"
                   startIcon={<LibraryAddOutlinedIcon />}
-                  disabled={isLoading || isSuccess}
+                  disabled={(disabled = { isRelevantDisabled })}
                   sx={(theme) => ({
                     color: theme.palette.getContrastText(
                       theme.palette.tertiary.main,
