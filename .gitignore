@@ -74,3 +74,6 @@ asreview/_version.py
 
 ### ASReview config ###
 .asreview-config/
+
+### misc convenience scripts 
+scripts/
