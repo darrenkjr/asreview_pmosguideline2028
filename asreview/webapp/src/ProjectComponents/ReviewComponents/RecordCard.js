@@ -25,6 +25,7 @@ import { fontSizeOptions } from "globals.js";
 
 const RecordCardContent = ({ record, fontSize, collapseAbstract }) => {
   const [readMoreOpen, toggleReadMore] = useToggle();
+  const [keywordsOpen, toggleKeywords] = useToggle();
 
   return (
     <CardContent aria-label="record title abstract" sx={{ m: 1 }}>
@@ -140,16 +141,34 @@ const RecordCardContent = ({ record, fontSize, collapseAbstract }) => {
             )}
           </Typography>
         </Box>
-        {record.keywords && (
+        {record.keywords && record.keywords.length > 0 && (
           <Box sx={{ pt: 1 }}>
-            <Typography sx={{ color: "text.secondary", fontWeight: "bold" }}>
-              {record.keywords.map((keyword, index) => (
-                <span key={index}>
-                  {index > 0 && " • "}
-                  {keyword}
-                </span>
-              ))}
-            </Typography>
+            <Button
+              onClick={toggleKeywords}
+              startIcon={keywordsOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+              color="primary"
+              size="small"
+              sx={{
+                textTransform: "none",
+                fontWeight: "bold",
+                p: 0,
+                minWidth: 0,
+              }}
+            >
+              Keywords
+            </Button>
+            <Collapse in={keywordsOpen}>
+              <Typography
+                sx={{ color: "text.secondary", fontWeight: "bold", mt: 1 }}
+              >
+                {record.keywords.map((keyword, index) => (
+                  <span key={index}>
+                    {index > 0 && " • "}
+                    {keyword}
+                  </span>
+                ))}
+              </Typography>
+            </Collapse>
           </Box>
         )}
       </Stack>
