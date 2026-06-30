@@ -145,8 +145,16 @@ const renderRecommendedTopics = (
   selectedValues,
   onSelect,
   disabled = false,
+  recommendedTagIds,
 ) => {
-  const recommended = group.values.slice(0, 5);
+  const recommended = recommendedTagIds
+    ? recommendedTagIds
+        .map((item) => {
+          const id = item && typeof item === "object" ? item.tag_id : item;
+          return group.values.find((t) => t.id === id);
+        })
+        .filter(Boolean)
+    : [];
   if (disabled || recommended.length === 0) return null;
 
   return (
@@ -213,6 +221,7 @@ const TagsDialog = ({
   open,
   onClose,
   onSave,
+  recommendedTags = null,
 }) => {
   const queryClient = useQueryClient();
   const [localTagValues, setLocalTagValues] = React.useState(
@@ -328,6 +337,8 @@ const TagsDialog = ({
                         tag,
                       ]);
                     },
+                    false,
+                    recommendedTags?.[`group_${group.id}`],
                   )}
                   <Autocomplete
                     multiple
@@ -497,6 +508,7 @@ const RecordCardLabeler = ({
   landscape = false,
   retrainAfterDecision = true,
   changeDecision = true,
+  recommendedTags = null,
 }) => {
   const queryClient = useQueryClient();
   const [editState] = useToggle(!(label === 1 || label === 0));
@@ -668,6 +680,7 @@ const RecordCardLabeler = ({
                           ]);
                         },
                         !editState || !changeDecision || isLoading || isSuccess,
+                        recommendedTags?.[`group_${group.id}`],
                       )}
                       <Autocomplete
                         multiple
@@ -1036,6 +1049,7 @@ const RecordCardLabeler = ({
               open={showTagsDialog}
               onClose={toggleShowTagsDialog}
               onSave={setTagValuesState}
+              recommendedTags={recommendedTags}
             />
           )}
           <Dialog

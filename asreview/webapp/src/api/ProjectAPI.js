@@ -815,6 +815,27 @@ class ProjectAPI {
         });
     });
   }
+
+  static uploadTopicRankings(variables) {
+    let body = new FormData();
+    body.set("file", variables.file);
+
+    const url = api_url + `projects/${variables.project_id}/topic_rankings`;
+    return new Promise((resolve, reject) => {
+      axios({
+        method: "post",
+        url: url,
+        data: body,
+        withCredentials: true,
+      })
+        .then((result) => {
+          resolve(result["data"]);
+        })
+        .catch((error) => {
+          reject(axiosErrorHandler(error));
+        });
+    });
+  }
 }
 
 export default ProjectAPI;

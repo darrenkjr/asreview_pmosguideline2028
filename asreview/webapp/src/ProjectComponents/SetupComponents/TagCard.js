@@ -568,6 +568,8 @@ const TagCard = () => {
   const [dialogOpen, toggleDialogOpen] = useToggle();
   const [anchorEl, setAnchorEl] = React.useState(null);
 
+  const [uploadStatus, setUploadStatus] = React.useState(null);
+
   const { data, isLoading } = useQuery(
     ["fetchTagGroups", { project_id: project_id }],
     ProjectAPI.fetchTagGroups,
@@ -575,6 +577,26 @@ const TagCard = () => {
       refetchOnWindowFocus: false,
     },
   );
+
+  const { mutate: uploadRankings, isLoading: isUploading } = useMutation(
+    ProjectAPI.uploadTopicRankings,
+    {
+      onSuccess: () => {
+        setUploadStatus("success");
+      },
+      onError: (err) => {
+        setUploadStatus(err?.message || "Failed to upload rankings");
+      },
+    },
+  );
+
+  const handleUploadRankings = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadStatus(null);
+    uploadRankings({ project_id, file });
+    e.target.value = null;
+  };
 
   return (
     <Card>
@@ -621,16 +643,42 @@ const TagCard = () => {
         {isLoading ? (
           <Skeleton variant="rectangular" width={100} height={36} />
         ) : (
-          <>
+          <Stack spacing={2}>
             <MutateGroupDialog
               project_id={project_id}
               open={dialogOpen}
               onClose={toggleDialogOpen}
             />
-            <Button onClick={toggleDialogOpen} variant="contained">
-              Add tags
-            </Button>
-          </>
+            <Stack direction="row" spacing={2}>
+              <Button onClick={toggleDialogOpen} variant="contained">
+                Add tags
+              </Button>
+              <Button
+                variant="outlined"
+                component="label"
+                disabled={isUploading}
+              >
+                {isUploading ? "Uploading..." : "Upload Topic Rankings"}
+                <input
+                  type="file"
+                  accept=".json"
+                  hidden
+                  onChange={handleUploadRankings}
+                />
+              </Button>
+            </Stack>
+
+            {uploadStatus === "success" && (
+              <Alert severity="success" onClose={() => setUploadStatus(null)}>
+                Topic rankings uploaded successfully!
+              </Alert>
+            )}
+            {uploadStatus && uploadStatus !== "success" && (
+              <Alert severity="error" onClose={() => setUploadStatus(null)}>
+                {uploadStatus}
+              </Alert>
+            )}
+          </Stack>
         )}
       </CardContent>
     </Card>

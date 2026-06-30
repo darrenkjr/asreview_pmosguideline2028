@@ -76,7 +76,7 @@ from asreview.utils import _get_filename_from_url
 from asreview.webapp import DB
 from asreview.webapp._api.utils import add_id_to_tags
 from asreview.webapp._api.utils import get_all_model_components
-from asreview.webapp._api.utils import read_tags_data
+from asreview.webapp._api.utils import read_tags_data, read_topic_rankings, validate_record_ranking_pairing
 from asreview.webapp._authentication.decorators import current_user_projects
 from asreview.webapp._authentication.decorators import login_required
 from asreview.webapp._authentication.decorators import project_authorization
@@ -541,6 +541,7 @@ def api_search_data(project):  # noqa: F401
         record_d = asdict(record)
         record_d["state"] = None
         record_d["tags_form"] = read_tags_data(project)
+        record_d["recommended_tags"] = read_topic_rankings(project, record_d)
         result.append(record_d)
 
     return jsonify({"result": result})
@@ -625,6 +626,7 @@ def api_get_labeled(project):  # noqa: F401
         record_d = asdict(record)
         record_d["state"] = state.to_dict()
         record_d["tags_form"] = read_tags_data(project)
+        record_d["recommended_tags"] = read_topic_rankings(project, record_d)
 
         if current_app.config.get("AUTHENTICATION", True):
             record_d["state"]["user"] = users.get(record_d["state"]["user_id"], None)
@@ -1078,6 +1080,44 @@ def update_tag_group(project, group_id):
     except Exception as err:
         logging.exception(err)
         return jsonify(message="Failed to update tag group."), 500
+
+
+@bp.route("/projects/<project_id>/topic_rankings", methods=["POST"])
+@login_required
+@project_authorization
+def api_upload_topic_rankings(project):
+    """Upload precomputed topic rankings for a project."""
+    if "file" not in request.files:
+        return jsonify(message="No file uploaded."), 400
+
+    file = request.files["file"]
+    if not file or not file.filename.endswith(".json"):
+        return jsonify(message="Invalid file format. Must be JSON."), 400
+
+    try:
+
+        #json schema and validation checks 
+        data = json.load(file)
+        if not isinstance(data, dict):
+            return jsonify(message="Invalid JSON format. Top-level must be an object."), 400
+        rankings = data.get("rankings", {})
+        if not rankings:
+            return jsonify(message="Missing 'rankings' section in JSON."), 400
+        is_valid, err_msg = validate_record_ranking_pairing(project, rankings)
+        if not is_valid:
+            return jsonify(message=err_msg), 400
+        # Save verified file
+        rankings_path = Path(project.project_path, "precomputed_topic_rankings.json")
+        with open(rankings_path, "w") as f:
+            json.dump(data, f)
+        return jsonify(success=True)
+        
+    except json.JSONDecodeError as err:
+        return jsonify(message=f"Invalid JSON: {err}"), 400
+    except Exception as err:
+        logging.exception(err)
+        return jsonify(message=f"Failed to process JSON file: {err}"), 500
+
 
 
 def _flatten_tags(results, tags_config):
@@ -1539,6 +1579,7 @@ def api_label_record(project, record_id):  # noqa: F401
             item = asdict(db.input.get_records(record_id))
         item["state"] = record.iloc[0].to_dict()
         item["tags_form"] = read_tags_data(project)
+        item["recommended_tags"] = read_topic_rankings(project, item)
         item["state"]["user"] = None
         del item["state"]["user_id"]
 
@@ -1590,6 +1631,7 @@ def api_get_record(project):  # noqa: F401
 
     item["state"] = pending.iloc[0].to_dict()
     item["tags_form"] = read_tags_data(project)
+    item["recommended_tags"] = read_topic_rankings(project, item)
     item["state"]["user"] = None
     del item["state"]["user_id"]
 

@@ -246,6 +246,7 @@ const RecordCard = ({
               showNotes={showNotes}
               tagsForm={record.tags_form}
               tagValues={record.state?.tags}
+              recommendedTags={record.recommended_tags}
               landscape={landscape}
               hotkeys={hotkeys}
               changeDecision={changeDecision}
