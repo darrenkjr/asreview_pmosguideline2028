@@ -85,7 +85,9 @@ const ProjectCard = ({ project, mode, showSimulatingSpinner = true }) => {
     if (review?.status === projectStatuses.SETUP) {
       toggleSetup();
     } else {
-      navigate(`${project.id}/${path}`);
+      const targetPath =
+        !path && mode === projectModes.ORACLE ? "reviewer" : path;
+      navigate(`${project.id}/${targetPath}`);
     }
   };
 
