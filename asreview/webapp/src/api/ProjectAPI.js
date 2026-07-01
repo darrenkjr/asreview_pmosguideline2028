@@ -836,6 +836,28 @@ class ProjectAPI {
         });
     });
   }
+
+  static uploadFeatureMatrix(variables) {
+    let body = new FormData();
+    body.set("file", variables.file);
+    body.set("name", variables.name);
+
+    const url = api_url + `projects/${variables.project_id}/feature_matrix`;
+    return new Promise((resolve, reject) => {
+      axios({
+        method: "post",
+        url: url,
+        data: body,
+        withCredentials: true,
+      })
+        .then((result) => {
+          resolve(result["data"]);
+        })
+        .catch((error) => {
+          reject(axiosErrorHandler(error));
+        });
+    });
+  }
 }
 
 export default ProjectAPI;

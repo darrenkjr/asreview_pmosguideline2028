@@ -117,6 +117,7 @@ logistic = "asreview.models.classifiers:Logistic"
 [project.entry-points."asreview.models.feature_extractors"]
 tfidf = "asreview.models.feature_extractors:Tfidf"
 onehot = "asreview.models.feature_extractors:OneHot"
+precomputed_embedding = "asreview.models.feature_extractors:PrecomputedEmbedding"
 
 [project.entry-points."asreview.models.balancers"]
 balanced = "asreview.models.balancers:Balanced"

@@ -96,6 +96,28 @@ const ModelCard = ({ mode = null, trainNewModel = false, editable = true }) => {
   const [selectedStopper, setSelectedStopper] = useState("none");
   const [stopperParams, setStopperParams] = useState({});
   const [stopperError, setStopperError] = useState(null);
+  const [embeddingUploadStatus, setEmbeddingUploadStatus] = useState(null);
+
+  const { mutate: uploadEmbeddings, isLoading: isUploadingEmbeddings } =
+    useMutation(ProjectAPI.uploadFeatureMatrix, {
+      onSuccess: () => {
+        setEmbeddingUploadStatus("success");
+      },
+      onError: (err) => {
+        setEmbeddingUploadStatus(err?.message || "Failed to upload embeddings");
+      },
+    });
+  const handleUploadEmbeddings = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setEmbeddingUploadStatus(null);
+    uploadEmbeddings({
+      project_id,
+      file,
+      name: modelConfig?.current_value?.feature_extractor,
+    });
+    e.target.value = null;
+  };
 
   const SNACKBAR_DURATION = 5000;
 
@@ -513,6 +535,48 @@ const ModelCard = ({ mode = null, trainNewModel = false, editable = true }) => {
                               });
                             }}
                           />
+
+                          {modelConfig?.current_value?.feature_extractor ===
+                            "precomputed_embedding" && (
+                            <Box sx={{ mt: 1, ml: 1 }}>
+                              <Typography
+                                variant="body2"
+                                color="text.secondary"
+                                sx={{ mb: 1 }}
+                              >
+                                Upload your precomputed embeddings (.npy or
+                                .npz):
+                              </Typography>
+                              <Button
+                                variant="outlined"
+                                component="label"
+                                size="small"
+                                disabled={isUploadingEmbeddings}
+                              >
+                                {isUploadingEmbeddings
+                                  ? "Uploading..."
+                                  : "Upload Embeddings"}
+                                <input
+                                  type="file"
+                                  accept=".npy,.npz"
+                                  hidden
+                                  onChange={handleUploadEmbeddings}
+                                />
+                              </Button>
+                              {embeddingUploadStatus === "success" && (
+                                <Alert severity="success" sx={{ mt: 1 }}>
+                                  Embeddings uploaded successfully.
+                                </Alert>
+                              )}
+                              {embeddingUploadStatus &&
+                                embeddingUploadStatus !== "success" && (
+                                  <Alert severity="error" sx={{ mt: 1 }}>
+                                    {embeddingUploadStatus}
+                                  </Alert>
+                                )}
+                            </Box>
+                          )}
+
                           <ModelComponentSelect
                             name="balancer"
                             label="Balancer"

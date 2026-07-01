@@ -230,3 +230,14 @@ class OneHot(Pipeline):
                 ),
             ]
         )
+
+class PrecomputedEmbedding: 
+    "Pleaceholder feature etract for user uploaded embedding features"
+    name = "precomputed"
+    label = "Precomputed Embeddings"
+
+    def transform(self, df):
+        raise NotImplementedError(
+            "Precomputed feature extractor requires a pre-uploaded "
+            "feature matrix. Please upload your .npy/.npz file."
+        )

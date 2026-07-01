@@ -1118,6 +1118,53 @@ def api_upload_topic_rankings(project):
         logging.exception(err)
         return jsonify(message=f"Failed to process JSON file: {err}"), 500
 
+@bp.route("/projects/<project_id>/feature_matrix", methods=["POST"])
+@login_required
+@project_authorization
+def api_upload_feature_matrix(project):
+    """Upload a precomputed feature matrix (.npy or .npz)."""
+    if "file" not in request.files:
+        return jsonify(message="No file uploaded."), 400
+
+    name = request.form.get("name")
+    if not name:
+        return jsonify(message="Feature extractor name is required."), 400
+
+    file = request.files["file"]
+    if not file or not file.filename.endswith((".npy", ".npz")):
+        return jsonify(message="Invalid format. Must be .npy or .npz."), 400
+
+    try:
+        import numpy as np
+        import scipy.sparse as sp
+        import io
+
+        file_bytes = io.BytesIO(file.read())
+
+        if file.filename.endswith(".npz"):
+            # .npz can be either scipy sparse or numpy dense archive
+            try:
+                feature_matrix = np.load(file_bytes, allow_pickle=False)
+            except Exception: 
+                #try scipy 
+                feature_matrix = sp.load_npz(file_bytes)
+        elif file.filename.endswith(".npy"):
+            feature_matrix = np.load(file_bytes, allow_pickle=False)
+
+        # Validate row count matches dataset size
+        num_records = len(project.db.input)
+        num_rows = feature_matrix.shape[0]
+        if num_rows != num_records:
+            return jsonify(
+                message=f"Row count mismatch. Matrix has {num_rows} rows, "
+                        f"but dataset has {num_records} records."
+            ), 400
+
+        project.add_feature_matrix(feature_matrix, name=name)
+        return jsonify(success=True)
+    except Exception as err:
+        return jsonify(message=f"Failed to process file: {err}"), 500
+
 
 
 def _flatten_tags(results, tags_config):
