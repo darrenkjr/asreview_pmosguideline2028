@@ -563,7 +563,8 @@ def api_get_labeled(project):  # noqa: F401
         if "is_prior" in filters:
             state_data = db.get_priors()
         else:
-            state_data = db.get_results_table()
+            priors = "exclude_prior" not in filters
+            state_data = db.get_results_table(priors=priors)
 
     if subset == "relevant":
         state_data = state_data[state_data["label"] == 1]
@@ -1144,9 +1145,11 @@ def api_upload_feature_matrix(project):
         if file.filename.endswith(".npz"):
             # .npz can be either scipy sparse or numpy dense archive
             try:
-                feature_matrix = np.load(file_bytes, allow_pickle=False)
+                npz_archive = np.load(file_bytes, allow_pickle=False)
+                feature_matrix = npz_archive[npz_archive.files[0]]
             except Exception: 
                 #try scipy 
+                file_bytes.seek(0)
                 feature_matrix = sp.load_npz(file_bytes)
         elif file.filename.endswith(".npy"):
             feature_matrix = np.load(file_bytes, allow_pickle=False)

@@ -6,6 +6,7 @@ import * as React from "react";
 const historyFilterOptions = [
   { value: "has_note", label: "Contains note" },
   { value: "is_prior", label: "Prior knowledge" },
+  { value: "exclude_prior", label: "Labeled" },
 ];
 
 const PREFIX = "Filter";
