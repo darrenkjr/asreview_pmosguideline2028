@@ -38,6 +38,7 @@ import {
   ReviewProgress,
   ShareFabAction,
   StoppingSuggestion,
+  TeamStatsCard,
   TimeSavedCard,
   WordCounts,
 } from "ProjectComponents/AnalyticsComponents";
@@ -299,6 +300,8 @@ const AnalyticsPage = () => {
             </Grid>
           )}
         </Grid>
+
+        {data?.mode !== "simulate" && <TeamStatsCard project_id={project_id} />}
 
         {data?.mode === "simulate" && (
           <>

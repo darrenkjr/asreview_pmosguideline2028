@@ -563,8 +563,7 @@ def api_get_labeled(project):  # noqa: F401
         if "is_prior" in filters:
             state_data = db.get_priors()
         else:
-            priors = "exclude_prior" not in filters
-            state_data = db.get_results_table(priors=priors)
+            state_data = db.get_results_table()
 
     if subset == "relevant":
         state_data = state_data[state_data["label"] == 1]
@@ -1143,16 +1142,12 @@ def api_upload_feature_matrix(project):
         file_bytes = io.BytesIO(file.read())
 
         if file.filename.endswith(".npz"):
-            # .npz can be either scipy sparse or numpy dense archive
-            try:
-                npz_archive = np.load(file_bytes, allow_pickle=False)
-                feature_matrix = npz_archive[npz_archive.files[0]]
+            feature_matrix = sp.load_npz(file_bytes)
+        elif file.filename.endswith(".npy"):
+                feature_matrix = np.load(file_bytes, allow_pickle=False)
             except Exception: 
                 #try scipy 
-                file_bytes.seek(0)
-                feature_matrix = sp.load_npz(file_bytes)
-        elif file.filename.endswith(".npy"):
-            feature_matrix = np.load(file_bytes, allow_pickle=False)
+                feature_matrix = 
 
         # Validate row count matches dataset size
         num_records = len(project.db.input)
@@ -1394,6 +1389,69 @@ def api_get_progress_info(project):  # noqa: F401
             "n_pool": n_records - len(labels),
         }
     )
+
+
+@bp.route("/projects/<project_id>/team_stats", methods=["GET"])
+@login_required
+@project_authorization
+def api_get_team_stats(project):
+    """Get screening stats for each team member"""
+    if not current_app.config.get("AUTHENTICATION", True):
+        return jsonify([])
+
+    try:
+        with project.db as db:
+            results = db.get_results_table(["label", "user_id"])
+    except Exception:
+        results = pd.DataFrame(columns=["label", "user_id"])
+
+    try:
+        project_entry = Project.query.filter(
+            Project.project_id == project.project_id
+        ).one_or_none()
+        users = {
+            u.id: u.summarize() for u in project_entry.collaborators
+        }
+        users[project_entry.owner.id] = project_entry.owner.summarize()
+    except Exception:
+        users = {}
+
+    # Group results by user_id
+    user_stats = {}
+    for user_id, user_info in users.items():
+        user_stats[user_id] = {
+            "user": user_info,
+            "n_screened": 0,
+            "n_relevant": 0,
+            "n_not_relevant": 0,
+        }
+
+    # Count from results
+    for _, row in results.iterrows():
+        u_id = row.get("user_id")
+        if pd.isna(u_id):
+            continue
+        u_id = int(u_id)
+        label = row.get("label")
+        if pd.isna(label):
+            continue
+        
+        if u_id not in user_stats:
+            user_stats[u_id] = {
+                "user": {"id": u_id, "name": f"User {u_id}", "email": ""},
+                "n_screened": 0,
+                "n_relevant": 0,
+                "n_not_relevant": 0,
+            }
+        
+        user_stats[u_id]["n_screened"] += 1
+        if label == 1:
+            user_stats[u_id]["n_relevant"] += 1
+        elif label == 0:
+            user_stats[u_id]["n_not_relevant"] += 1
+
+    stats = list(user_stats.values())
+    return jsonify(stats)
 
 
 @bp.route("/projects/<project_id>/metrics", methods=["GET"])

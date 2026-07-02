@@ -575,6 +575,21 @@ class ProjectAPI {
     });
   }
 
+  static fetchTeamStats({ queryKey }) {
+    const { project_id } = queryKey[1];
+    const url = api_url + `projects/${project_id}/team_stats`;
+    return new Promise((resolve, reject) => {
+      axios
+        .get(url, { withCredentials: true })
+        .then((result) => {
+          resolve(result["data"]);
+        })
+        .catch((error) => {
+          reject(axiosErrorHandler(error));
+        });
+    });
+  }
+
   static fetchMetrics({ queryKey }) {
     const { project_id } = queryKey[1];
     const url = api_url + `projects/${project_id}/metrics`;

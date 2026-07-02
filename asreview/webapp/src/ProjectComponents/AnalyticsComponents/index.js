@@ -9,3 +9,4 @@ export { default as StoppingSuggestion } from "./StoppingSuggestion";
 export { default as WordCounts } from "./WordCounts";
 export { default as TimeSavedCard } from "./TimeSavedCard";
 export { default as Metrics } from "./Metrics";
+export { default as TeamStatsCard } from "./TeamStatsCard";
