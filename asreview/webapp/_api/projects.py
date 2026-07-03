@@ -1145,9 +1145,6 @@ def api_upload_feature_matrix(project):
             feature_matrix = sp.load_npz(file_bytes)
         elif file.filename.endswith(".npy"):
                 feature_matrix = np.load(file_bytes, allow_pickle=False)
-            except Exception: 
-                #try scipy 
-                feature_matrix = 
 
         # Validate row count matches dataset size
         num_records = len(project.db.input)
