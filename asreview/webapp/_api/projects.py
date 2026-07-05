@@ -100,6 +100,37 @@ except importlib.metadata.PackageNotFoundError:
 bp = Blueprint("api", __name__, url_prefix="/api")
 
 
+def _assemble_notes(skip_notes, label_note_text, label_time, label_user_id, auth_enabled, users):
+    """Combine skip notes and labeling notes into a single chronological timeline list."""
+    notes = []
+    for item in skip_notes:
+        notes.append({
+            "user_id": item["user_id"],
+            "text": item["note"],
+            "time": item["time"],
+        })
+    if label_note_text and str(label_note_text).strip() != "":
+        notes.append({
+            "user_id": label_user_id,
+            "text": str(label_note_text),
+            "time": label_time,
+        })
+    notes.sort(key=lambda x: x["time"])
+    for note in notes:
+        u_id = note.get("user_id")
+        if auth_enabled and users and u_id in users:
+            note["user"] = users[u_id]
+        else:
+            note["user"] = {
+                "name": "Reviewer",
+                "email": "",
+                "current_user": True
+            }
+        if "user_id" in note:
+            del note["user_id"]
+    return notes
+
+
 def _fill_last_ranking(project, ranking):
     """Fill the last ranking with a random or top-down ranking.
 
@@ -620,6 +651,9 @@ def api_get_labeled(project):  # noqa: F401
             for i, u in users.items()
         }
 
+    with project.db as db:
+        batch_skip_notes = db.get_skip_notes_batch(state_data["record_id"].to_list())
+
     records = project.db.input.get_records(state_data["record_id"].to_list())
     result = []
     for (_, state), record in zip(state_data.iterrows(), records):
@@ -632,6 +666,15 @@ def api_get_labeled(project):  # noqa: F401
             record_d["state"]["user"] = users.get(record_d["state"]["user_id"], None)
         else:
             record_d["state"]["user"] = None
+
+        record_d["notes"] = _assemble_notes(
+            batch_skip_notes.get(record_d["record_id"], []),
+            state.get("note"),
+            state.get("time"),
+            state.get("user_id"),
+            current_app.config.get("AUTHENTICATION", True),
+            users if current_app.config.get("AUTHENTICATION", True) else None
+        )
 
         del record_d["state"]["user_id"]
         result.append(record_d)
@@ -1704,6 +1747,26 @@ def api_update_note(project, record_id):  # noqa: F401
     return jsonify({"success": True})
 
 
+@bp.route("/projects/<project_id>/record/<record_id>/skip", methods=["DELETE"])
+@login_required
+@project_authorization
+def api_skip_record(project, record_id):
+    """Skip record during screening by pushing it to the bottom of the pool."""
+    record_id = int(record_id)
+    note = request.form.get("note", type=str)
+    if not note and request.json:
+        note = request.json.get("note")
+    note = note if note and note.strip() != "" else None
+
+    user_id = (
+        current_user.id if current_app.config.get("AUTHENTICATION", True) else None
+    )
+
+    with project.db as db:
+        db.skip_record(record_id, user_id, note)
+    return jsonify({"success": True})
+
+
 @bp.route("/projects/<project_id>/get_record", methods=["GET"])
 @login_required
 @project_authorization
@@ -1733,12 +1796,22 @@ def api_get_record(project):  # noqa: F401
                     return jsonify({"result": None, "status": "setup"})
 
         item = asdict(db.input.get_records(pending["record_id"].iloc[0]))
+        skip_notes = db.get_skip_notes(item["record_id"])
+        lbl_record = db.get_results_record(item["record_id"])
+        lbl_note = lbl_record.iloc[0].get("note") if not lbl_record.empty else None
+        lbl_time = lbl_record.iloc[0].get("time") if not lbl_record.empty else None
+        lbl_user_id = lbl_record.iloc[0].get("user_id") if not lbl_record.empty else None
 
     item["state"] = pending.iloc[0].to_dict()
     item["tags_form"] = read_tags_data(project)
     item["recommended_tags"] = read_topic_rankings(project, item)
     item["state"]["user"] = None
     del item["state"]["user_id"]
+    item["notes"] = _assemble_notes(
+        skip_notes, lbl_note, lbl_time, lbl_user_id,
+        current_app.config.get("AUTHENTICATION", True),
+        None
+    )
 
     try:
         item["error"] = project.get_review_error()

@@ -234,6 +234,17 @@ class Database:
                             user_id INTEGER)"""
         )
 
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS skipped_notes
+                            (record_id INTEGER,
+                            user_id INTEGER,
+                            note TEXT,
+                            time FLOAT)"""
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skipped_notes_record_id ON skipped_notes(record_id)"
+        )
+
         self._conn.commit()
 
         self._set_results_changes_triggers()
@@ -276,6 +287,21 @@ class Database:
 
         if not self.read_only:
             self._fix_decision_changes_schema(cur)
+            self._ensure_skipped_notes_table(cur)
+
+    def _ensure_skipped_notes_table(self, cur):
+        """Ensure the skipped_notes table and index exist."""
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS skipped_notes
+                            (record_id INTEGER,
+                            user_id INTEGER,
+                            note TEXT,
+                            time FLOAT)"""
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_skipped_notes_record_id ON skipped_notes(record_id)"
+        )
+        self._conn.commit()
 
     def _fix_decision_changes_schema(self, cur):
         """Fix decision_changes schema for projects migrated from old v2 format.
@@ -812,3 +838,46 @@ class Database:
         """
 
         return pd.read_sql_query("SELECT * FROM decision_changes", self._conn)
+
+    def skip_record(self, record_id, user_id=None, note=None):
+        con = self._conn
+        cur = con.cursor()
+        cur.execute(
+            "INSERT INTO skipped_notes (record_id, user_id, note, time) VALUES (?, ?, ?, ?)",
+            (record_id, user_id, note, time.time())
+        )
+        cur.execute("DELETE FROM results WHERE record_id = ?", (record_id,))
+        cur.execute(
+            """UPDATE last_ranking 
+            SET ranking = (SELECT COALESCE(MAX(ranking), 0) + 1 FROM last_ranking) 
+            WHERE record_id = ?""",
+            (record_id,)
+        )
+        con.commit()
+
+    def get_skip_notes(self, record_id):
+        con = self._conn
+        cur = con.cursor()
+        res = cur.execute(
+            "SELECT user_id, note, time FROM skipped_notes WHERE record_id = ? ORDER BY time ASC",
+            (record_id,)
+        ).fetchall()
+        return [{"user_id": r[0], "note": r[1], "time": r[2]} for r in res]
+
+    def get_skip_notes_batch(self, record_ids):
+        if not record_ids:
+            return {}
+        con = self._conn
+        cur = con.cursor()
+        placeholders = ",".join("?" for _ in record_ids)
+        res = cur.execute(
+            f"SELECT record_id, user_id, note, time FROM skipped_notes WHERE record_id IN ({placeholders}) ORDER BY time ASC",
+            record_ids
+        ).fetchall()
+        
+        notes_by_record = {}
+        for r in res:
+            notes_by_record.setdefault(r[0], []).append(
+                {"user_id": r[1], "note": r[2], "time": r[3]}
+            )
+        return notes_by_record

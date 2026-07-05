@@ -241,6 +241,7 @@ const RecordCard = ({
               }
               retrainAfterDecision={retrainAfterDecision}
               note={record.state?.note}
+              notes={record.notes}
               labelTime={record.state?.time}
               user={record.state?.user}
               showNotes={showNotes}

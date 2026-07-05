@@ -37,7 +37,11 @@ import { ProjectAPI } from "api";
 import { useToggle } from "hooks/useToggle";
 import TimeAgo from "javascript-time-ago";
 
-import { DeleteOutline, LabelOutlined } from "@mui/icons-material";
+import {
+  DeleteOutline,
+  LabelOutlined,
+  SkipNextOutlined,
+} from "@mui/icons-material";
 import en from "javascript-time-ago/locale/en";
 
 TimeAgo.addLocale(en);
@@ -134,6 +138,87 @@ const NoteDialog = ({ project_id, record_id, open, onClose, note = null }) => {
           disabled={isLoading || noteState === note}
         >
           Save
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const SkipDialog = ({
+  project_id,
+  record_id,
+  open,
+  onClose,
+  onDecisionClose,
+}) => {
+  const queryClient = useQueryClient();
+  const [noteState, setNoteState] = React.useState("");
+
+  const { isError, isLoading, mutate } = useMutation(
+    ProjectAPI.mutateSkipRecord,
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
+        queryClient.invalidateQueries(["fetchProjectStatus", { project_id }]);
+        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
+        if (onDecisionClose) {
+          onDecisionClose();
+        }
+        onClose();
+      },
+    },
+  );
+
+  const handleSkip = () => {
+    mutate({
+      project_id,
+      record_id,
+      note: noteState,
+    });
+  };
+
+  React.useEffect(() => {
+    if (open) {
+      setNoteState("");
+    }
+  }, [open]);
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth disableRestoreFocus>
+      <DialogTitle>Skip record</DialogTitle>
+      <DialogContent>
+        <Typography sx={{ mb: 2 }}>
+          Are you sure you want to skip this record? It will be returned to the
+          pool and globally snoozed to the bottom of the queue.
+        </Typography>
+        <TextField
+          autoFocus
+          margin="dense"
+          id="skip-note"
+          label="Why are you skipping? (optional)"
+          type="text"
+          fullWidth
+          variant="outlined"
+          multiline
+          rows={3}
+          value={noteState}
+          onChange={(e) => setNoteState(e.target.value)}
+        />
+        {isError && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            Failed to skip record.
+          </Alert>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          onClick={handleSkip}
+          variant="contained"
+          color="warning"
+          disabled={isLoading}
+        >
+          Skip
         </Button>
       </DialogActions>
     </Dialog>
@@ -500,6 +585,7 @@ const RecordCardLabeler = ({
   tagsForm,
   tagValues = null,
   note = null,
+  notes = null,
   showNotes = true,
   labelTime = null,
   user = null,
@@ -513,13 +599,44 @@ const RecordCardLabeler = ({
   const queryClient = useQueryClient();
   const [editState] = useToggle(!(label === 1 || label === 0));
   const [showNotesDialog, toggleShowNotesDialog] = useToggle(false);
+  const [showSkipDialog, toggleShowSkipDialog] = useToggle(false);
   const [showTagsDialog, toggleShowTagsDialog] = useToggle(false);
   const [tagValuesState, setTagValuesState] = React.useState(
     mergeTagValues(tagsForm, tagValues),
   );
 
+  const allNotes = React.useMemo(() => {
+    if (notes && notes.length > 0) {
+      return notes;
+    }
+    if (note && typeof note === "string" && note.trim() !== "") {
+      return [
+        {
+          user: user || { name: "Reviewer", email: "", current_user: true },
+          time: labelTime,
+          text: note,
+        },
+      ];
+    }
+    return [];
+  }, [note, notes, user, labelTime]);
+
   const { error, isError, isLoading, mutate, isSuccess } = useMutation(
     ProjectAPI.mutateClassification,
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
+        queryClient.invalidateQueries(["fetchProjectStatus", { project_id }]);
+        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
+        if (onDecisionClose) {
+          onDecisionClose();
+        }
+      },
+    },
+  );
+
+  const { mutate: skipRecord, isLoading: isSkipping } = useMutation(
+    ProjectAPI.mutateSkipRecord,
     {
       onSuccess: () => {
         queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
@@ -627,6 +744,10 @@ const RecordCardLabeler = ({
     "n",
     () => hotkeys && !isLoading && !isSuccess && toggleShowNotesDialog(),
     { keyup: true },
+  );
+  useHotkeys(
+    "s",
+    () => hotkeys && !isLoading && !isSuccess && toggleShowSkipDialog(),
   );
 
   return (
@@ -764,24 +885,74 @@ const RecordCardLabeler = ({
         )}
       </Box>
       <Box>
-        {(note !== null || labelFromDataset !== null) && (
+        {(allNotes.length > 0 || labelFromDataset !== null) && (
           <>
             <Divider />
             <CardContent>
-              {note && (
+              {allNotes.length > 0 && (
                 <Paper
                   elevation={0}
                   sx={{
                     p: 2,
                     mb: 2,
                     bgcolor: "background.default",
+                    borderRadius: 2,
                   }}
                 >
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <NoteAltOutlinedIcon />
-                    <Typography variant="subtitle1">Note</Typography>
+                  <Stack spacing={2}>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <NoteAltOutlinedIcon />
+                      <Typography
+                        variant="subtitle1"
+                        sx={{ fontWeight: "bold" }}
+                      >
+                        Notes
+                      </Typography>
+                    </Stack>
+                    <Divider />
+                    <Stack spacing={2}>
+                      {allNotes.map((noteItem, idx) => (
+                        <Box key={idx}>
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            alignItems="center"
+                            sx={{ mb: 0.5 }}
+                          >
+                            <Typography
+                              variant="subtitle2"
+                              sx={{ fontWeight: "bold", color: "primary.main" }}
+                            >
+                              {noteItem.user
+                                ? noteItem.user.current_user
+                                  ? "You"
+                                  : noteItem.user.name
+                                : "Anonymous"}
+                            </Typography>
+                            {noteItem.time && (
+                              <Typography
+                                variant="caption"
+                                color="text.secondary"
+                              >
+                                •{" "}
+                                {timeAgo.format(new Date(noteItem.time * 1000))}
+                              </Typography>
+                            )}
+                          </Stack>
+                          <Typography
+                            variant="body2"
+                            sx={{
+                              pl: 0.5,
+                              color: "text.primary",
+                              whiteSpace: "pre-wrap",
+                            }}
+                          >
+                            {noteItem.text}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Stack>
                   </Stack>
-                  <Typography sx={{ mt: 1 }}>{note}</Typography>
                 </Paper>
               )}
               {labelFromDataset === 0 && (
@@ -878,6 +1049,18 @@ const RecordCardLabeler = ({
                   color="grey.600"
                 >
                   Not relevant
+                </Button>
+              </Tooltip>
+              <Tooltip title="Skip this record (keyboard shortcut: S)">
+                <Button
+                  id="skip"
+                  onClick={toggleShowSkipDialog}
+                  startIcon={<SkipNextOutlined />}
+                  disabled={isLoading || isSuccess || isSkipping}
+                  variant="outlined"
+                  color="warning"
+                >
+                  Skip
                 </Button>
               </Tooltip>
             </>
@@ -1037,6 +1220,13 @@ const RecordCardLabeler = ({
             open={showNotesDialog}
             onClose={toggleShowNotesDialog}
             note={note}
+          />
+          <SkipDialog
+            project_id={project_id}
+            record_id={record_id}
+            open={showSkipDialog}
+            onClose={toggleShowSkipDialog}
+            onDecisionClose={onDecisionClose}
           />
           {hasTags && (
             <TagsDialog
