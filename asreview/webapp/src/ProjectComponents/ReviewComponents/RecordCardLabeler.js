@@ -635,24 +635,12 @@ const RecordCardLabeler = ({
     },
   );
 
-  const { mutate: skipRecord, isLoading: isSkipping } = useMutation(
-    ProjectAPI.mutateSkipRecord,
-    {
-      onSuccess: () => {
-        queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
-        queryClient.invalidateQueries(["fetchProjectStatus", { project_id }]);
-        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
-        if (onDecisionClose) {
-          onDecisionClose();
-        }
-      },
-    },
-  );
-
   const hasTags = Array.isArray(tagsForm) && tagsForm.length > 0;
   const isAnyTagChecked =
     tagValuesState?.some((group) => group.values?.some((tag) => tag.checked)) ??
     false;
+  const isAlreadySkipped =
+    labelTime !== null && (label === null || label === undefined);
   const isRelevantDisabled =
     isLoading || isSuccess || (hasTags && !isAnyTagChecked);
   const [dialogLabel, setDialogLabel] = React.useState(label);
@@ -1051,21 +1039,23 @@ const RecordCardLabeler = ({
                   Not relevant
                 </Button>
               </Tooltip>
-              <Tooltip title="Skip this record (keyboard shortcut: S)">
-                <Button
-                  id="skip"
-                  onClick={toggleShowSkipDialog}
-                  startIcon={<SkipNextOutlined />}
-                  disabled={isLoading || isSuccess || isSkipping}
-                  variant="outlined"
-                  color="warning"
-                >
-                  Skip
-                </Button>
-              </Tooltip>
+              {!isAlreadySkipped && (
+                <Tooltip title="Skip this record (keyboard shortcut: S)">
+                  <Button
+                    id="skip"
+                    onClick={toggleShowSkipDialog}
+                    startIcon={<SkipNextOutlined />}
+                    disabled={isLoading || isSuccess}
+                    variant="outlined"
+                    color="warning"
+                  >
+                    Skip
+                  </Button>
+                </Tooltip>
+              )}
             </>
           )}
-          {(label === 1 || label === 0) && (
+          {(label === 1 || label === 0 || isAlreadySkipped) && (
             <>
               {!landscape && (
                 <Typography
@@ -1084,9 +1074,11 @@ const RecordCardLabeler = ({
                           : theme.palette.text.primary,
                   })}
                 >
-                  Labeled {label === 1 ? "relevant" : "not relevant"}{" "}
+                  {label === 1 || label === 0
+                    ? `Labeled ${label === 1 ? "relevant" : "not relevant"} `
+                    : "Skipped "}
                   {user && formatUser(user)}{" "}
-                  {timeAgo.format(new Date(labelTime * 1000))}
+                  {labelTime && timeAgo.format(new Date(labelTime * 1000))}
                 </Typography>
               )}
             </>

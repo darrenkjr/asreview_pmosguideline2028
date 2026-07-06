@@ -104,11 +104,12 @@ def _assemble_notes(skip_notes, label_note_text, label_time, label_user_id, auth
     """Combine skip notes and labeling notes into a single chronological timeline list."""
     notes = []
     for item in skip_notes:
-        notes.append({
-            "user_id": item["user_id"],
-            "text": item["note"],
-            "time": item["time"],
-        })
+        if item["note"] and str(item["note"]).strip() != "":
+            notes.append({
+                "user_id": item["user_id"],
+                "text": item["note"],
+                "time": item["time"],
+            })
     if label_note_text and str(label_note_text).strip() != "":
         notes.append({
             "user_id": label_user_id,
@@ -591,17 +592,20 @@ def api_get_labeled(project):  # noqa: F401
     latest_first = request.args.get("latest_first", default=1, type=int)
 
     with project.db as db:
-        if "is_prior" in filters:
+        if subset == "skipped":
+            state_data = db.get_skipped_table()
+        elif "is_prior" in filters:
             state_data = db.get_priors()
         else:
             state_data = db.get_results_table()
 
-    if subset == "relevant":
-        state_data = state_data[state_data["label"] == 1]
-    elif subset == "irrelevant":
-        state_data = state_data[state_data["label"] == 0]
-    else:
-        state_data = state_data[~state_data["label"].isnull()]
+    if subset != "skipped":
+        if subset == "relevant":
+            state_data = state_data[state_data["label"] == 1]
+        elif subset == "irrelevant":
+            state_data = state_data[state_data["label"] == 0]
+        else:
+            state_data = state_data[~state_data["label"].isnull()]
 
     if "has_note" in filters:
         state_data = state_data[~state_data["note"].isnull()]

@@ -881,3 +881,18 @@ class Database:
                 {"user_id": r[1], "note": r[2], "time": r[3]}
             )
         return notes_by_record
+
+    def get_skipped_table(self):
+        """Get table of all skipped records with their latest skip state."""
+        query = """
+            SELECT record_id, NULL as user_id, NULL as note, MAX(time) as time, NULL as label
+            FROM skipped_notes
+            GROUP BY record_id
+            HAVING record_id NOT IN (
+                SELECT record_id 
+                FROM results 
+                WHERE label IS NOT NULL
+            )
+            ORDER BY time ASC
+        """
+        return pd.read_sql_query(query, self._conn)

@@ -95,6 +95,14 @@ const LabelHistory = ({
                 }}
               />
               <Chip
+                label="Skipped"
+                color="warning"
+                variant={label !== "skipped" ? "outlined" : "filled"}
+                onClick={() => {
+                  setLabel("skipped");
+                }}
+              />
+              <Chip
                 label={"Full history"}
                 color="primary"
                 variant={label !== "all" ? "outlined" : "filled"}
