@@ -1044,6 +1044,13 @@ def get_tag_groups(project):
 @login_required
 @project_authorization
 def create_tag_group(project):
+    if current_app.config.get("AUTHENTICATION", True):
+        db_project = Project.query.filter(
+            Project.project_id == project.project_id
+        ).one_or_none()
+        if db_project and current_user.id != db_project.owner_id:
+            return jsonify(message="Only the project owner can create tag groups."), 403
+
     tags_path = Path(project.project_path, "tags.json")
 
     new_tag_group = json.loads(request.form.get("group", "[]"))
@@ -1082,11 +1089,123 @@ def create_tag_group(project):
         return jsonify(message="Failed to create tag group."), 500
 
 
+def label_to_export(label):
+    import re
+    if not label:
+        return ""
+    label_lower = str(label).lower()
+    label_underscores = re.sub(r'\s+', '_', label_lower)
+    return re.sub(r'[^a-z0-9_]', '', label_underscores)
+
+
+@bp.route("/projects/<project_id>/tags/import-csv", methods=["POST"])
+@login_required
+@project_authorization
+def import_tags_csv(project):
+    """Import tag group and criteria from a CSV using pandas."""
+    if current_app.config.get("AUTHENTICATION", True):
+        db_project = Project.query.filter(
+            Project.project_id == project.project_id
+        ).one_or_none()
+        if db_project and current_user.id != db_project.owner_id:
+            return jsonify(message="Only the project owner can import tags & criteria."), 403
+
+    if "file" not in request.files:
+        return jsonify(message="No file uploaded."), 400
+
+    file = request.files["file"]
+    try:
+        df = pd.read_csv(file)
+    except Exception as err:
+        logging.exception(err)
+        return jsonify(message="Invalid CSV file format."), 400
+
+    # Locate the question_title column
+    title_col = None
+    for col in df.columns:
+        if str(col).lower().strip() in ("question_title", "title", "topic"):
+            title_col = col
+            break
+
+    if title_col is None:
+        return jsonify(message="CSV must contain a 'question_title' column."), 400
+
+    # Parse criteria column mappings
+    criteria_cols = {}
+    for col in df.columns:
+        if col == title_col:
+            continue
+        parts = str(col).lower().strip().split("_", 1)
+        if len(parts) == 2 and parts[0] in ("inclusion", "exclusion"):
+            direction = parts[0]
+            dimension = parts[1].replace("_", " ").title()
+            criteria_cols[col] = (direction, dimension)
+
+    all_dimensions = list(set(dim for _, dim in criteria_cols.values()))
+    # Build tag values
+    tag_values = []
+    for _, row in df.iterrows():
+        label = str(row[title_col]).strip() if pd.notna(row[title_col]) else ""
+        if not label:
+            continue
+
+        criteria = {"inclusion": {}, "exclusion": {}}
+        for dim in all_dimensions:
+            criteria["inclusion"][dim] = ""
+            criteria["exclusion"][dim] = ""
+
+        for col, (direction, dimension) in criteria_cols.items():
+            val = row.get(col)
+            criteria[direction][dimension] = str(val).strip() if pd.notna(val) else ""
+
+        tag_values.append({
+            "label": label,
+            "export": label_to_export(label),
+            "criteria": criteria
+        })
+
+    if not tag_values:
+        return jsonify(message="No valid topics found in CSV."), 400
+
+    tags_path = Path(project.project_path, "tags.json")
+    try:
+        with open(tags_path, "r") as f:
+            tags = json.load(f)
+    except FileNotFoundError:
+        tags = []
+
+    group_id = max([g["id"] for g in tags], default=0) + 1
+    new_tag_group = {
+        "id": group_id,
+        "label": "Imported Guideline Topic List and Criteria",
+        "export": f"imported_criteria_{group_id}",
+        "min_selection": 1,
+        "values": tag_values
+    }
+
+    for i, tag in enumerate(new_tag_group["values"]):
+        tag["id"] = i
+
+    tags.append(new_tag_group)
+
+    with open(tags_path, "w") as f:
+        json.dump(tags, f)
+
+    return jsonify(tags)
+
+
 @bp.route("/projects/<project_id>/tags/<int:group_id>", methods=["PUT"])
 @login_required
 @project_authorization
 def update_tag_group(project, group_id):
     """Update a single tag group by its ID."""
+    if current_app.config.get("AUTHENTICATION", True):
+        db_project = Project.query.filter(
+            Project.project_id == project.project_id
+        ).one_or_none()
+        if db_project and current_user.id != db_project.owner_id:
+            return jsonify(message="Only the project owner can update tag groups."), 403
+
     tags_path = Path(project.project_path, "tags.json")
 
     updated_tag_group = json.loads(request.form.get("group", "[]"))

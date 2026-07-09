@@ -17,6 +17,11 @@ import {
   Popover,
   Skeleton,
   Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
   TextField,
   Tooltip,
   Typography,
@@ -28,7 +33,7 @@ import { LoadingCardHeader } from "StyledComponents/LoadingCardheader";
 import { ProjectAPI } from "api";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 
-import { Add } from "@mui/icons-material";
+import { Add, CheckCircleOutline } from "@mui/icons-material";
 import BookmarksIcon from "@mui/icons-material/Bookmarks";
 import FolderOpenIcon from "@mui/icons-material/FolderOpen";
 import StyleIcon from "@mui/icons-material/Style";
@@ -532,25 +537,253 @@ const MutateGroupDialog = ({ project_id, open, onClose, group = null }) => {
   );
 };
 
-const Group = ({ project_id, group }) => {
+const CriteriaDialog = ({ open, onClose, tag, isOwner, onSave, isSaving }) => {
+  const defaultDims = ["Population", "Intervention", "Comparison", "Outcome"];
+  const existingDims = React.useMemo(() => {
+    if (!tag?.criteria) return [];
+    return [
+      ...new Set([
+        ...Object.keys(tag.criteria.inclusion || {}),
+        ...Object.keys(tag.criteria.exclusion || {}),
+      ]),
+    ];
+  }, [tag]);
+
+  const [dimensions, setDimensions] = React.useState(() => {
+    return [...new Set([...defaultDims, ...existingDims])];
+  });
+
+  const [criteriaState, setCriteriaState] = React.useState({
+    inclusion: {},
+    exclusion: {},
+  });
+
+  const [newDimName, setNewDimName] = React.useState("");
+
+  React.useEffect(() => {
+    if (tag) {
+      const criteria = tag.criteria || {};
+      const inclusion = criteria.inclusion || {};
+      const exclusion = criteria.exclusion || {};
+      setCriteriaState({
+        inclusion: { ...inclusion },
+        exclusion: { ...exclusion },
+      });
+      setDimensions([...new Set([...defaultDims, ...existingDims])]);
+    }
+  }, [tag, existingDims]);
+
+  const handleCellChange = (direction, dimension, value) => {
+    setCriteriaState((prev) => ({
+      ...prev,
+      [direction]: {
+        ...prev[direction],
+        [dimension]: value,
+      },
+    }));
+  };
+
+  const handleAddDimension = () => {
+    const trimmed = newDimName.trim();
+    if (!trimmed) return;
+    const formatted = trimmed.replace(/\b\w/g, (c) => c.toUpperCase());
+    if (!dimensions.includes(formatted)) {
+      setDimensions((prev) => [...prev, formatted]);
+    }
+    setNewDimName("");
+  };
+
+  const handleSave = () => {
+    const cleaned = { inclusion: {}, exclusion: {} };
+    dimensions.forEach((dim) => {
+      const incVal = (criteriaState.inclusion[dim] || "").trim();
+      const excVal = (criteriaState.exclusion[dim] || "").trim();
+      cleaned.inclusion[dim] = incVal;
+      cleaned.exclusion[dim] = excVal;
+    });
+    onSave(cleaned);
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>
+        {isOwner
+          ? `Edit Criteria: ${tag?.label}`
+          : `View Criteria: ${tag?.label}`}
+      </DialogTitle>
+      <DialogContent>
+        <Table size="small" sx={{ mt: 1 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: "bold", width: "20%" }}>
+                Dimension
+              </TableCell>
+              <TableCell
+                sx={{ fontWeight: "bold", color: "success.main", width: "40%" }}
+              >
+                Inclusion
+              </TableCell>
+              <TableCell
+                sx={{ fontWeight: "bold", color: "error.main", width: "40%" }}
+              >
+                Exclusion
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {dimensions.map((dim) => (
+              <TableRow key={dim}>
+                <TableCell sx={{ fontWeight: "bold", verticalAlign: "middle" }}>
+                  {dim}
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={2}
+                    size="small"
+                    value={criteriaState.inclusion[dim] || ""}
+                    onChange={(e) =>
+                      handleCellChange("inclusion", dim, e.target.value)
+                    }
+                    disabled={!isOwner || isSaving}
+                  />
+                </TableCell>
+                <TableCell>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={2}
+                    size="small"
+                    value={criteriaState.exclusion[dim] || ""}
+                    onChange={(e) =>
+                      handleCellChange("exclusion", dim, e.target.value)
+                    }
+                    disabled={!isOwner || isSaving}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+
+        {isOwner && (
+          <Stack
+            direction="row"
+            spacing={2}
+            sx={{ mt: 2, alignItems: "center" }}
+          >
+            <TextField
+              size="small"
+              label="New Custom Dimension"
+              value={newDimName}
+              onChange={(e) => setNewDimName(e.target.value)}
+              disabled={isSaving}
+            />
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleAddDimension}
+              disabled={!newDimName.trim() || isSaving}
+            >
+              Add Dimension
+            </Button>
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={isSaving}>
+          {isOwner ? "Cancel" : "Close"}
+        </Button>
+        {isOwner && (
+          <Button onClick={handleSave} variant="contained" disabled={isSaving}>
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const Group = ({ project_id, group, isOwner }) => {
   const [dialogOpen, toggleDialogOpen] = useToggle();
+  const [selectedTag, setSelectedTag] = React.useState(null);
+  const [criteriaOpen, setCriteriaOpen] = React.useState(false);
+
+  const queryClient = useQueryClient();
+  const { mutate: mutateTagGroup, isLoading: isSaving } = useMutation(
+    ProjectAPI.mutateTagGroup,
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(["fetchTagGroups", { project_id }]);
+        setCriteriaOpen(false);
+        setSelectedTag(null);
+      },
+      onError: (err) => {
+        console.error("Failed to save tag group criteria:", err);
+      },
+    },
+  );
+
+  const handleTagClick = (tag) => {
+    setSelectedTag(tag);
+    setCriteriaOpen(true);
+  };
+
+  const handleSaveCriteria = (updatedCriteria) => {
+    const tagIndex = group.values.findIndex((t) => t.id === selectedTag.id);
+    if (tagIndex === -1) return;
+
+    const updatedValues = [...group.values];
+    updatedValues[tagIndex] = {
+      ...updatedValues[tagIndex],
+      criteria: updatedCriteria,
+    };
+
+    mutateTagGroup({
+      project_id,
+      group: {
+        ...group,
+        values: updatedValues,
+      },
+    });
+  };
 
   return (
     <Card sx={{ mb: 2, bgcolor: "background.default" }}>
       <CardHeader
         title={group.label}
         action={
-          <Tooltip title="Edit Group">
-            <IconButton onClick={toggleDialogOpen}>
-              <EditIcon />
-            </IconButton>
-          </Tooltip>
+          isOwner && (
+            <Tooltip title="Edit Group">
+              <IconButton onClick={toggleDialogOpen}>
+                <EditIcon />
+              </IconButton>
+            </Tooltip>
+          )
         }
       />
       <CardContent>
-        {group.values.map((t, index) => (
-          <Chip key={index} label={`${t.label} (${t.export})`} sx={{ m: 1 }} />
-        ))}
+        {group.values.map((t, index) => {
+          const hasCriteria =
+            t.criteria &&
+            Object.values(t.criteria).some((dir) =>
+              Object.values(dir).some((val) => val && val.trim() !== ""),
+            );
+          return (
+            <Chip
+              key={index}
+              label={t.label}
+              onClick={() => handleTagClick(t)}
+              icon={
+                hasCriteria ? (
+                  <CheckCircleOutline fontSize="small" />
+                ) : undefined
+              }
+              sx={{ m: 1, cursor: "pointer" }}
+            />
+          );
+        })}
       </CardContent>
       <MutateGroupDialog
         key={group.id}
@@ -558,6 +791,17 @@ const Group = ({ project_id, group }) => {
         open={dialogOpen}
         onClose={toggleDialogOpen}
         group={group}
+      />
+      <CriteriaDialog
+        open={criteriaOpen}
+        onClose={() => {
+          setCriteriaOpen(false);
+          setSelectedTag(null);
+        }}
+        tag={selectedTag}
+        isOwner={isOwner}
+        onSave={handleSaveCriteria}
+        isSaving={isSaving}
       />
     </Card>
   );
@@ -578,6 +822,18 @@ const TagCard = () => {
     },
   );
 
+  const { data: projectInfo } = useQuery(
+    ["fetchInfo", { project_id }],
+    ProjectAPI.fetchInfo,
+    {
+      refetchOnWindowFocus: false,
+      enabled: !!project_id,
+    },
+  );
+  const isOwner = !window.authentication || projectInfo?.roles?.owner === true;
+
+  const [csvUploadStatus, setCsvUploadStatus] = React.useState(null);
+
   const { mutate: uploadRankings, isLoading: isUploading } = useMutation(
     ProjectAPI.uploadTopicRankings,
     {
@@ -590,6 +846,21 @@ const TagCard = () => {
     },
   );
 
+  const { mutate: uploadCSV, isLoading: isUploadingCSV } = useMutation(
+    ProjectAPI.uploadTagsCSV,
+    {
+      onSuccess: () => {
+        setCsvUploadStatus("success");
+        queryClient.invalidateQueries(["fetchTagGroups", { project_id }]);
+      },
+      onError: (err) => {
+        setCsvUploadStatus(
+          err?.message || "Failed to import topics & criteria",
+        );
+      },
+    },
+  );
+
   const handleUploadRankings = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -597,6 +868,16 @@ const TagCard = () => {
     uploadRankings({ project_id, file });
     e.target.value = null;
   };
+
+  const handleUploadCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setCsvUploadStatus(null);
+    uploadCSV({ project_id, file });
+    e.target.value = null;
+  };
+
+  const queryClient = useQueryClient();
 
   return (
     <Card>
@@ -633,7 +914,12 @@ const TagCard = () => {
               </Alert>
             )}
             {data.map((c, index) => (
-              <Group key={index} group={c} project_id={project_id} />
+              <Group
+                key={index}
+                group={c}
+                project_id={project_id}
+                isOwner={isOwner}
+              />
             ))}
           </>
         )}
@@ -649,24 +935,41 @@ const TagCard = () => {
               open={dialogOpen}
               onClose={toggleDialogOpen}
             />
-            <Stack direction="row" spacing={2}>
-              <Button onClick={toggleDialogOpen} variant="contained">
-                Add tags
-              </Button>
-              <Button
-                variant="outlined"
-                component="label"
-                disabled={isUploading}
-              >
-                {isUploading ? "Uploading..." : "Upload Topic Rankings"}
-                <input
-                  type="file"
-                  accept=".json"
-                  hidden
-                  onChange={handleUploadRankings}
-                />
-              </Button>
-            </Stack>
+            {isOwner && (
+              <Stack direction="row" spacing={2}>
+                <Button onClick={toggleDialogOpen} variant="contained">
+                  Add tags
+                </Button>
+                <Button
+                  variant="outlined"
+                  component="label"
+                  disabled={isUploading || isUploadingCSV}
+                >
+                  {isUploadingCSV
+                    ? "Importing CSV..."
+                    : "Import Topics & Criteria (CSV)"}
+                  <input
+                    type="file"
+                    accept=".csv"
+                    hidden
+                    onChange={handleUploadCSV}
+                  />
+                </Button>
+                <Button
+                  variant="outlined"
+                  component="label"
+                  disabled={isUploading || isUploadingCSV}
+                >
+                  {isUploading ? "Uploading..." : "Upload Topic Rankings"}
+                  <input
+                    type="file"
+                    accept=".json"
+                    hidden
+                    onChange={handleUploadRankings}
+                  />
+                </Button>
+              </Stack>
+            )}
 
             {uploadStatus === "success" && (
               <Alert severity="success" onClose={() => setUploadStatus(null)}>
@@ -676,6 +979,20 @@ const TagCard = () => {
             {uploadStatus && uploadStatus !== "success" && (
               <Alert severity="error" onClose={() => setUploadStatus(null)}>
                 {uploadStatus}
+              </Alert>
+            )}
+
+            {csvUploadStatus === "success" && (
+              <Alert
+                severity="success"
+                onClose={() => setCsvUploadStatus(null)}
+              >
+                Topics and criteria imported successfully!
+              </Alert>
+            )}
+            {csvUploadStatus && csvUploadStatus !== "success" && (
+              <Alert severity="error" onClose={() => setCsvUploadStatus(null)}>
+                {csvUploadStatus}
               </Alert>
             )}
           </Stack>
