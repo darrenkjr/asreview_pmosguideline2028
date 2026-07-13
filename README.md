@@ -4,6 +4,18 @@ Fork of the ASReview Open source Screening software to support and pilot workflo
 
 Specifically: Overarching search and triage where a team screens records and assigns them to 1 of X topics - with a stopping criteria
 
+Current changs include: 
+* topic assignment and management - (leveraging existing tag system)
+* upload of inclusion / exclusion criteria of topics for referene during screening 
+* upload of precomputed embeddings as input into classifiers 
+* upload of ranked topics list to streamine triage of articles to 1 of N topics 
+* support for stop criteria (Buscarpy)
+* skip function - with optional incorporation of notes 
+* UI updates to view skipped records
+* dashboard view allowing view of screening process across different reviewrs
+
+and more
+
 ---
 <!-- ASReview LAB v3 Banner -->
 <p align="center">
