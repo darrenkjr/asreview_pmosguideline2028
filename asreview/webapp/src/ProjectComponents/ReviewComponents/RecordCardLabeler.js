@@ -39,9 +39,11 @@ import TimeAgo from "javascript-time-ago";
 
 import {
   DeleteOutline,
+  InfoOutlined,
   LabelOutlined,
   SkipNextOutlined,
 } from "@mui/icons-material";
+import CriteriaDialog from "ProjectComponents/CriteriaDialog";
 import en from "javascript-time-ago/locale/en";
 
 TimeAgo.addLocale(en);
@@ -231,6 +233,7 @@ const renderRecommendedTopics = (
   onSelect,
   disabled = false,
   recommendedTagIds,
+  onCriteriaClick,
 ) => {
   const recommended = recommendedTagIds
     ? recommendedTagIds
@@ -256,39 +259,61 @@ const renderRecommendedTopics = (
           const isSelected = selectedValues.some(
             (selected) => selected.id === tag.id,
           );
+          const hasCriteria =
+            tag.criteria &&
+            Object.values(tag.criteria).some((dir) =>
+              Object.values(dir).some((val) => val && val.trim() !== ""),
+            );
           return (
-            <Tooltip
+            <Stack
               key={`rec-${group.id}-${tag.id}`}
-              title={tag.label}
-              enterDelay={500}
+              direction="row"
+              alignItems="center"
+              spacing={0.5}
             >
-              <Chip
-                label={tag.label}
-                variant={isSelected ? "filled" : "outlined"}
-                color={isSelected ? "primary" : "default"}
-                onClick={() => {
-                  if (!isSelected) {
-                    onSelect(tag);
-                  }
-                }}
-                disabled={isSelected}
-                sx={{
-                  height: "auto",
-                  cursor: isSelected ? "default" : "pointer",
-                  opacity: isSelected ? 0.6 : 1,
-                  transition: "all 0.2s ease-in-out",
-                  "& .MuiChip-label": {
-                    display: "block",
-                    whiteSpace: "normal",
-                    wordBreak: "break-word",
-                    py: 0.5,
-                  },
-                  "&:hover": {
-                    transform: isSelected ? "none" : "scale(1.05)",
-                  },
-                }}
-              />
-            </Tooltip>
+              <Tooltip title={tag.label} enterDelay={500}>
+                <Chip
+                  label={tag.label}
+                  variant={isSelected ? "filled" : "outlined"}
+                  color={isSelected ? "primary" : "default"}
+                  onClick={() => {
+                    if (!isSelected) {
+                      onSelect(tag);
+                    }
+                  }}
+                  disabled={isSelected}
+                  sx={{
+                    height: "auto",
+                    cursor: isSelected ? "default" : "pointer",
+                    opacity: isSelected ? 0.6 : 1,
+                    transition: "all 0.2s ease-in-out",
+                    "& .MuiChip-label": {
+                      display: "block",
+                      whiteSpace: "normal",
+                      wordBreak: "break-word",
+                      py: 0.5,
+                    },
+                    "&:hover": {
+                      transform: isSelected ? "none" : "scale(1.05)",
+                    },
+                  }}
+                />
+              </Tooltip>
+              {hasCriteria && onCriteriaClick && (
+                <Tooltip title="View criteria">
+                  <IconButton
+                    size="small"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCriteriaClick(tag);
+                    }}
+                    sx={{ p: 0.25 }}
+                  >
+                    <InfoOutlined fontSize="small" color="inherit" />
+                  </IconButton>
+                </Tooltip>
+              )}
+            </Stack>
           );
         })}
       </Stack>
@@ -308,6 +333,12 @@ const TagsDialog = ({
   onSave,
   recommendedTags = null,
 }) => {
+  const [criteriaTag, setCriteriaTag] = React.useState(null);
+  const [criteriaOpen, setCriteriaOpen] = React.useState(false);
+  const handleCriteriaClick = (tag) => {
+    setCriteriaTag(tag);
+    setCriteriaOpen(true);
+  };
   const queryClient = useQueryClient();
   const [localTagValues, setLocalTagValues] = React.useState(
     mergeTagValues(tagsForm, tagValues),
@@ -424,6 +455,7 @@ const TagsDialog = ({
                     },
                     false,
                     recommendedTags?.[`group_${group.id}`],
+                    handleCriteriaClick,
                   )}
                   <Autocomplete
                     multiple
@@ -440,6 +472,13 @@ const TagsDialog = ({
                     renderTags={(value, getTagProps) =>
                       value.map((option, index) => {
                         const { key, ...tagProps } = getTagProps({ index });
+                        const hasCriteria =
+                          option.criteria &&
+                          Object.values(option.criteria).some((dir) =>
+                            Object.values(dir).some(
+                              (val) => val && val.trim() !== "",
+                            ),
+                          );
                         return (
                           <Tooltip
                             key={key}
@@ -448,7 +487,26 @@ const TagsDialog = ({
                           >
                             <Chip
                               variant="outlined"
-                              label={option.label}
+                              label={
+                                <Stack
+                                  direction="row"
+                                  alignItems="center"
+                                  spacing={0.5}
+                                >
+                                  <span>{option.label}</span>
+                                  {hasCriteria && (
+                                    <InfoOutlined
+                                      fontSize="small"
+                                      color="inherit"
+                                      sx={{ cursor: "pointer", ml: 0.5 }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCriteriaClick(option);
+                                      }}
+                                    />
+                                  )}
+                                </Stack>
+                              }
                               {...tagProps}
                               sx={{
                                 height: "auto",
@@ -467,6 +525,13 @@ const TagsDialog = ({
                     }
                     renderOption={(props, option) => {
                       const { key, ...optionProps } = props;
+                      const hasCriteria =
+                        option.criteria &&
+                        Object.values(option.criteria).some((dir) =>
+                          Object.values(dir).some(
+                            (val) => val && val.trim() !== "",
+                          ),
+                        );
                       return (
                         <Box
                           component="li"
@@ -475,9 +540,30 @@ const TagsDialog = ({
                           sx={{
                             whiteSpace: "normal",
                             wordBreak: "break-word",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
                           }}
                         >
-                          {option.label}
+                          <span>{option.label}</span>
+                          {hasCriteria && (
+                            <Tooltip title="View criteria">
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  handleCriteriaClick(option);
+                                }}
+                                sx={{ p: 0.25, ml: 1 }}
+                              >
+                                <InfoOutlined
+                                  fontSize="small"
+                                  color="inherit"
+                                />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Box>
                       );
                     }}
@@ -509,6 +595,18 @@ const TagsDialog = ({
           Save
         </Button>
       </DialogActions>
+
+      <CriteriaDialog
+        open={criteriaOpen}
+        onClose={() => {
+          setCriteriaOpen(false);
+          setCriteriaTag(null);
+        }}
+        tag={criteriaTag}
+        isOwner={false}
+        onSave={() => {}}
+        isSaving={false}
+      />
 
       <Dialog
         open={showConfirmEmpty}
@@ -604,6 +702,12 @@ const RecordCardLabeler = ({
   const [tagValuesState, setTagValuesState] = React.useState(
     mergeTagValues(tagsForm, tagValues),
   );
+  const [inlineCriteriaTag, setInlineCriteriaTag] = React.useState(null);
+  const [inlineCriteriaOpen, setInlineCriteriaOpen] = React.useState(false);
+  const handleInlineCriteriaClick = (tag) => {
+    setInlineCriteriaTag(tag);
+    setInlineCriteriaOpen(true);
+  };
 
   const allNotes = React.useMemo(() => {
     if (notes && notes.length > 0) {
@@ -790,6 +894,7 @@ const RecordCardLabeler = ({
                         },
                         !editState || !changeDecision || isLoading || isSuccess,
                         recommendedTags?.[`group_${group.id}`],
+                        handleInlineCriteriaClick,
                       )}
                       <Autocomplete
                         multiple
@@ -809,6 +914,13 @@ const RecordCardLabeler = ({
                         renderTags={(value, getTagProps) =>
                           value.map((option, index) => {
                             const { key, ...tagProps } = getTagProps({ index });
+                            const hasCriteria =
+                              option.criteria &&
+                              Object.values(option.criteria).some((dir) =>
+                                Object.values(dir).some(
+                                  (val) => val && val.trim() !== "",
+                                ),
+                              );
                             return (
                               <Tooltip
                                 key={key}
@@ -817,7 +929,26 @@ const RecordCardLabeler = ({
                               >
                                 <Chip
                                   variant="outlined"
-                                  label={option.label}
+                                  label={
+                                    <Stack
+                                      direction="row"
+                                      alignItems="center"
+                                      spacing={0.5}
+                                    >
+                                      <span>{option.label}</span>
+                                      {hasCriteria && (
+                                        <InfoOutlined
+                                          fontSize="small"
+                                          color="inherit"
+                                          sx={{ cursor: "pointer", ml: 0.5 }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleInlineCriteriaClick(option);
+                                          }}
+                                        />
+                                      )}
+                                    </Stack>
+                                  }
                                   {...tagProps}
                                   sx={{
                                     height: "auto",
@@ -836,6 +967,13 @@ const RecordCardLabeler = ({
                         }
                         renderOption={(props, option) => {
                           const { key, ...optionProps } = props;
+                          const hasCriteria =
+                            option.criteria &&
+                            Object.values(option.criteria).some((dir) =>
+                              Object.values(dir).some(
+                                (val) => val && val.trim() !== "",
+                              ),
+                            );
                           return (
                             <Box
                               component="li"
@@ -844,9 +982,30 @@ const RecordCardLabeler = ({
                               sx={{
                                 whiteSpace: "normal",
                                 wordBreak: "break-word",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
                               }}
                             >
-                              {option.label}
+                              <span>{option.label}</span>
+                              {hasCriteria && (
+                                <Tooltip title="View criteria">
+                                  <IconButton
+                                    size="small"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      e.preventDefault();
+                                      handleInlineCriteriaClick(option);
+                                    }}
+                                    sx={{ p: 0.25, ml: 1 }}
+                                  >
+                                    <InfoOutlined
+                                      fontSize="small"
+                                      color="inherit"
+                                    />
+                                  </IconButton>
+                                </Tooltip>
+                              )}
                             </Box>
                           );
                         }}
@@ -1267,6 +1426,17 @@ const RecordCardLabeler = ({
           </Dialog>
         </CardActions>
       </Box>
+      <CriteriaDialog
+        open={inlineCriteriaOpen}
+        onClose={() => {
+          setInlineCriteriaOpen(false);
+          setInlineCriteriaTag(null);
+        }}
+        tag={inlineCriteriaTag}
+        isOwner={false}
+        onSave={() => {}}
+        isSaving={false}
+      />
     </Stack>
   );
 };
