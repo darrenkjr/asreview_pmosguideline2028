@@ -231,10 +231,16 @@ class OneHot(Pipeline):
             ]
         )
 
-class PrecomputedEmbedding: 
+class PrecomputedEmbedding(BaseEstimator, TransformerMixin): 
     "Pleaceholder feature etract for user uploaded embedding features"
-    name = "precomputed"
+    name = "precomputed_embedding"
     label = "Precomputed Embeddings"
+
+    def __init__(self): 
+        pass
+
+    def fit(self, X, y=None):
+        return self
 
     def transform(self, df):
         raise NotImplementedError(

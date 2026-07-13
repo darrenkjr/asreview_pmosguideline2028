@@ -31,8 +31,19 @@ def test_features(tmpdir, feature_extractor):
 
     db = asr.load_dataset(data_fp, dataset_id="test_id")
     model = load_extension("models.feature_extractors", feature_extractor.name)()
+    if model.name == "precomputed_embedding": 
+        pass
+    else: 
+        X = model.fit_transform(db.input.get_df())
+        assert X.shape[0] == len(db.input)
+        assert X.shape[1] > 0
 
-    X = model.fit_transform(db.input.get_df())
 
-    assert X.shape[0] == len(db.input)
-    assert X.shape[1] > 0
+def test_precomputed_embedding():
+    from asreview.models.feature_extractors import PrecomputedEmbedding
+    model = PrecomputedEmbedding()
+    assert model.name == "precomputed_embedding"
+    assert isinstance(model.get_params(), dict)
+    assert model.fit(None) is model
+    with pytest.raises(NotImplementedError):
+        model.transform(None)

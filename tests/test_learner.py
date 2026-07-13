@@ -24,6 +24,7 @@ feature_extractor_parameters = {
         "max_df": 0.9,
     },
     "onehot": {"ngram_range": (1, 2)},
+    "precomputed_embedding": {},
 }
 
 # Get all classifiers and feature extractors from ASReview, filtering contrib models
