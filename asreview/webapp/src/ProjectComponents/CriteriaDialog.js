@@ -14,6 +14,8 @@ import {
   TextField,
 } from "@mui/material";
 
+const defaultDims = ["Population", "Intervention", "Comparison", "Outcome"];
+
 const CriteriaDialog = ({
   open,
   onClose,
@@ -22,7 +24,6 @@ const CriteriaDialog = ({
   onSave,
   isSaving = false,
 }) => {
-  const defaultDims = ["Population", "Intervention", "Comparison", "Outcome"];
   const existingDims = React.useMemo(() => {
     if (!tag?.criteria) return [];
     return [
@@ -53,9 +54,9 @@ const CriteriaDialog = ({
         inclusion: { ...inclusion },
         exclusion: { ...exclusion },
       });
-      setDimensions([...new Set([...defaultDims, ...existingDims])]); // eslint-disable-line react-hooks/exhaustive-deps
+      setDimensions([...new Set([...defaultDims, ...existingDims])]);
     }
-  }, [tag, existingDims]);
+  }, [tag, existingDims]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCellChange = (direction, dimension, value) => {
     setCriteriaState((prev) => ({
