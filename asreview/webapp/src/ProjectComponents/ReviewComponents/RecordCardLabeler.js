@@ -358,6 +358,16 @@ const TagsDialog = ({
     localTagValues?.some((group) => group.values.some((tag) => tag.checked)) ??
     false;
 
+  const localTagRequirementsMet = React.useMemo(() => {
+    return (
+      localTagValues?.every(
+        (g) =>
+          (g.values?.filter((t) => t.checked).length ?? 0) >=
+          (g.min_selection ?? 0),
+      ) ?? true
+    );
+  }, [localTagValues]);
+
   const handleAutoCompleteChange = (groupId, newSelectedTags) => {
     let groupI = localTagValues.findIndex((group) => group.id === groupId);
     if (groupI === -1) return;
@@ -591,7 +601,13 @@ const TagsDialog = ({
         <Button onClick={onClose} color="primary">
           Cancel
         </Button>
-        <Button onClick={handleSave} color="primary" disabled={isLoading}>
+        <Button
+          onClick={handleSave}
+          color="primary"
+          disabled={
+            isLoading || (isLocalAnyChecked && !localTagRequirementsMet)
+          }
+        >
           Save
         </Button>
       </DialogActions>
@@ -743,10 +759,16 @@ const RecordCardLabeler = ({
   const isAnyTagChecked =
     tagValuesState?.some((group) => group.values?.some((tag) => tag.checked)) ??
     false;
+  const tagRequirementsMet =
+    tagValuesState?.every(
+      (g) =>
+        (g.values?.filter((t) => t.checked).length ?? 0) >=
+        (g.min_selection ?? 0),
+    ) ?? true;
   const isAlreadySkipped =
     labelTime !== null && (label === null || label === undefined);
   const isRelevantDisabled =
-    isLoading || isSuccess || (hasTags && !isAnyTagChecked);
+    isLoading || isSuccess || (hasTags && !tagRequirementsMet);
   const [dialogLabel, setDialogLabel] = React.useState(label);
   const [showConfirmNotRelevant, setShowConfirmNotRelevant] =
     React.useState(false);
