@@ -466,7 +466,7 @@ const TagsDialog = ({
                     value={
                       localTagValues[i]?.values.filter((t) => t.checked) || []
                     }
-                    onChange={(newValue) => {
+                    onChange={(event, newValue) => {
                       handleAutoCompleteChange(group.id, newValue);
                     }}
                     renderTags={(value, getTagProps) =>
