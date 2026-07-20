@@ -95,15 +95,18 @@ def get_all_model_components():
 def read_topic_rankings(project, record_data):
     """Read precomputed topic rankings for a specific record."""
     record_id = None
+    dataset_row = None
 
     if isinstance(record_data, dict):
         record_id = record_data.get("record_id")
+        dataset_row = record_data.get("dataset_row")
     elif hasattr(record_data, "record_id"):
         record_id = getattr(record_data, "record_id")
+        dataset_row = getattr(record_data, "dataset_row", None)
     else:
         record_id = record_data
 
-    if record_id is None:
+    if record_id is None and dataset_row is None:
         return None
 
     rankings_path = Path(project.project_path, "precomputed_topic_rankings.json")
@@ -117,11 +120,21 @@ def read_topic_rankings(project, record_data):
 
     all_rankings = ranking_data.get("rankings", {})
 
-    # Match solely by record_id
-    if str(record_id) in all_rankings:
-        return all_rankings[str(record_id)]
-    else: 
-        return None
+    keys_to_try = []
+    if record_id is not None:
+        keys_to_try.extend([str(record_id), record_id])
+        try:
+            keys_to_try.extend([str(int(record_id) - 1), int(record_id) - 1])
+        except (ValueError, TypeError):
+            pass
+    if dataset_row is not None:
+        keys_to_try.extend([str(dataset_row), dataset_row])
+
+    for k in keys_to_try:
+        if k in all_rankings:
+            return all_rankings[k]
+
+    return None
 
 def validate_record_ranking_pairing(project, rankings):
     """Validate that uploaded rankings align with the project database.

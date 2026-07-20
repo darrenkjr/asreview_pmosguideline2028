@@ -667,6 +667,8 @@ const TagCard = () => {
     {
       onSuccess: () => {
         setUploadStatus("success");
+        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
+        queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
       },
       onError: (err) => {
         setUploadStatus(err?.message || "Failed to upload rankings");
@@ -680,6 +682,8 @@ const TagCard = () => {
       onSuccess: () => {
         setCsvUploadStatus("success");
         queryClient.invalidateQueries(["fetchTagGroups", { project_id }]);
+        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
+        queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
       },
       onError: (err) => {
         setCsvUploadStatus(

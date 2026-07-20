@@ -235,15 +235,20 @@ const renderRecommendedTopics = (
   recommendedTagIds,
   onCriteriaClick,
 ) => {
-  const recommended = recommendedTagIds
-    ? recommendedTagIds
-        .map((item) => {
-          const id = item && typeof item === "object" ? item.tag_id : item;
-          return group.values.find((t) => t.id === id);
-        })
-        .filter(Boolean)
-    : [];
-  if (disabled || recommended.length === 0) return null;
+  if (!recommendedTagIds) return null;
+
+  const recommended = (
+    Array.isArray(recommendedTagIds) ? recommendedTagIds : [recommendedTagIds]
+  )
+    .map((item) => {
+      const id = item?.tag_id ?? item?.id ?? item;
+      return group.values.find(
+        (t) => t.id === id || String(t.id) === String(id),
+      );
+    })
+    .filter(Boolean);
+
+  if (recommended.length === 0) return null;
 
   return (
     <Box sx={{ mb: 2 }}>
@@ -277,11 +282,11 @@ const renderRecommendedTopics = (
                   variant={isSelected ? "filled" : "outlined"}
                   color={isSelected ? "primary" : "default"}
                   onClick={() => {
-                    if (!isSelected) {
+                    if (!disabled && !isSelected) {
                       onSelect(tag);
                     }
                   }}
-                  disabled={isSelected}
+                  disabled={disabled || isSelected}
                   sx={{
                     height: "auto",
                     cursor: isSelected ? "default" : "pointer",
@@ -464,7 +469,9 @@ const TagsDialog = ({
                       ]);
                     },
                     false,
-                    recommendedTags?.[`group_${group.id}`],
+                    recommendedTags?.[`group_${i}`] ||
+                      recommendedTags?.[`group_${group.id}`] ||
+                      recommendedTags?.[group.id],
                     handleCriteriaClick,
                   )}
                   <Autocomplete
@@ -915,7 +922,9 @@ const RecordCardLabeler = ({
                           ]);
                         },
                         !editState || !changeDecision || isLoading || isSuccess,
-                        recommendedTags?.[`group_${group.id}`],
+                        recommendedTags?.[`group_${i}`] ||
+                          recommendedTags?.[`group_${group.id}`] ||
+                          recommendedTags?.[group.id],
                         handleInlineCriteriaClick,
                       )}
                       <Autocomplete
