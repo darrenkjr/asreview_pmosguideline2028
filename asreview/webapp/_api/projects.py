@@ -1308,13 +1308,12 @@ def api_upload_feature_matrix(project):
         file_bytes = io.BytesIO(file.read())
 
         if file.filename.endswith(".npz"):
-            try:
-                feature_matrix = sp.load_npz(file_bytes)
-            except Exception:
-                file_bytes.seek(0)
-                npz_data = np.load(file_bytes, allow_pickle=False)
-                key = "embeddings" if "embeddings" in npz_data else npz_data.files[0]
-                feature_matrix = npz_data[key]
+
+            file_bytes.seek(0)
+            npz_data = np.load(file_bytes, allow_pickle=False)
+            key = "embeddings" if "embeddings" in npz_data else npz_data.files[0]
+            feature_matrix = npz_data[key]
+
         elif file.filename.endswith(".npy"):
             feature_matrix = np.load(file_bytes, allow_pickle=False)
 
