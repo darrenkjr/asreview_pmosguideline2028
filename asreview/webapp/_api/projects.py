@@ -76,7 +76,7 @@ from asreview.utils import _get_filename_from_url
 from asreview.webapp import DB
 from asreview.webapp._api.utils import add_id_to_tags
 from asreview.webapp._api.utils import get_all_model_components
-from asreview.webapp._api.utils import read_tags_data, read_topic_rankings, validate_record_ranking_pairing
+from asreview.webapp._api.utils import read_tags_data, read_topic_rankings, validate_record_ranking_pairing, validate_uploaded_embeddings
 from asreview.webapp._authentication.decorators import current_user_projects
 from asreview.webapp._authentication.decorators import login_required
 from asreview.webapp._authentication.decorators import project_authorization
@@ -659,12 +659,27 @@ def api_get_labeled(project):  # noqa: F401
         batch_skip_notes = db.get_skip_notes_batch(state_data["record_id"].to_list())
 
     records = project.db.input.get_records(state_data["record_id"].to_list())
+
+    # Pre-fetch shared tags config and topic rankings ONCE before the loop
+    tags_form = read_tags_data(project)
+
+    rankings_path = Path(project.project_path, "precomputed_topic_rankings.json")
+    all_topic_rankings = None
+    if rankings_path.exists():
+        try:
+            with open(rankings_path, "r", encoding="utf-8") as f:
+                all_topic_rankings = json.load(f).get("rankings", {})
+        except Exception:
+            all_topic_rankings = None
+
     result = []
     for (_, state), record in zip(state_data.iterrows(), records):
         record_d = asdict(record)
         record_d["state"] = state.to_dict()
-        record_d["tags_form"] = read_tags_data(project)
-        record_d["recommended_tags"] = read_topic_rankings(project, record_d)
+        record_d["tags_form"] = tags_form
+        record_d["recommended_tags"] = read_topic_rankings(
+            project, record_d, preloaded_rankings=all_topic_rankings
+        )
 
         if current_app.config.get("AUTHENTICATION", True):
             record_d["state"]["user"] = users.get(record_d["state"]["user_id"], None)
@@ -1261,7 +1276,6 @@ def api_upload_topic_rankings(project):
         return jsonify(message="Invalid file format. Must be JSON."), 400
 
     try:
-
         #json schema and validation checks 
         data = json.load(file)
         if not isinstance(data, dict):
@@ -1302,29 +1316,25 @@ def api_upload_feature_matrix(project):
 
     try:
         import numpy as np
-        import scipy.sparse as sp
         import io
 
         file_bytes = io.BytesIO(file.read())
 
         if file.filename.endswith(".npz"):
-
             file_bytes.seek(0)
             npz_data = np.load(file_bytes, allow_pickle=False)
             key = "embeddings" if "embeddings" in npz_data else npz_data.files[0]
             feature_matrix = npz_data[key]
+ 
+            is_valid, err_msg = validate_uploaded_embeddings(project, feature_matrix, npz_data)
+            if not is_valid:
+                return jsonify(message=err_msg), 400
 
         elif file.filename.endswith(".npy"):
             feature_matrix = np.load(file_bytes, allow_pickle=False)
-
-        # Validate row count matches dataset size
-        num_records = len(project.db.input)
-        num_rows = feature_matrix.shape[0]
-        if num_rows != num_records:
-            return jsonify(
-                message=f"Row count mismatch. Matrix has {num_rows} rows, "
-                        f"but dataset has {num_records} records."
-            ), 400
+            is_valid, err_msg = validate_uploaded_embeddings(project, feature_matrix)
+            if not is_valid:
+                return jsonify(message=err_msg), 400
 
         project.add_feature_matrix(feature_matrix, name=name)
         return jsonify(success=True)

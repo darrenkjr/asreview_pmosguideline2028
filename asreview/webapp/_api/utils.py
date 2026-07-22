@@ -92,7 +92,7 @@ def get_all_model_components():
     return model_components
 
 
-def read_topic_rankings(project, record_data):
+def read_topic_rankings(project, record_data, preloaded_rankings=None):
     """Read precomputed topic rankings for a specific record."""
     record_id = None
     dataset_row = None
@@ -109,16 +109,18 @@ def read_topic_rankings(project, record_data):
     if record_id is None and dataset_row is None:
         return None
 
-    rankings_path = Path(project.project_path, "precomputed_topic_rankings.json")
-    try:
-        with open(rankings_path, "r", encoding="utf-8") as f:
-            ranking_data = json.load(f)
-    except FileNotFoundError:
-        return None
-    except Exception as err:
-        raise RuntimeError(f"Failed to read topic rankings: {err}")
-
-    all_rankings = ranking_data.get("rankings", {})
+    if preloaded_rankings is None:
+        rankings_path = Path(project.project_path, "precomputed_topic_rankings.json")
+        try:
+            with open(rankings_path, "r", encoding="utf-8") as f:
+                ranking_data = json.load(f)
+            all_rankings = ranking_data.get("rankings", {})
+        except FileNotFoundError:
+            return None
+        except Exception as err:
+            raise RuntimeError(f"Failed to read topic rankings: {err}")
+    else:
+        all_rankings = preloaded_rankings
 
     keys_to_try = []
     if record_id is not None:
@@ -136,6 +138,55 @@ def read_topic_rankings(project, record_data):
 
     return None
 
+def normalize_title(title):
+    import re
+    if not title:
+        return ""
+    return re.sub(r"\s+", " ", title.strip().lower())
+
+def validate_uploaded_embeddings(project, feature_matrix, npz_data=None): 
+    """Validate that uploaded embeddings align with the project database
+    
+    Checks:
+
+    """
+    
+    num_records = len(project.db.input)
+    num_rows = feature_matrix.shape[0]
+    if num_rows != num_records:
+        return False, (
+            f"Row count mismatch. Matrix has {num_rows} rows, "
+            f"but dataset has {num_records} records."
+        )
+ 
+    db_df = project.db.input.get_df().sort_values("record_id")
+    if db_df["record_id"].tolist() != list(range(num_records)):
+        return False, (
+            "Record IDs are not contiguous from 0, so matrix rows cannot be "
+            "matched to records by position. The dataset may have had records "
+            "removed."
+        )
+    
+    if npz_data is not None and 'titles' in npz_data:
+        raw_up_titles = [
+            v.decode("utf-8") if isinstance(v, bytes) else str(v)
+            for v in npz_data["titles"]
+        ]
+        raw_db_titles = db_df["title"].fillna("").tolist()
+        norm_up_titles = [normalize_title(t) for t in raw_up_titles]
+        norm_db_titles = [normalize_title(t) for t in raw_db_titles]
+        if all(norm_up_titles) and all(norm_db_titles):
+            for i in range(num_rows): 
+                if norm_up_titles[i] != norm_db_titles[i]:
+                    return False, (
+                        f"Title mismatch at record ID {i}. "
+                        f"Uploaded title: '{raw_up_titles[i]}', "
+                    f"Project DB title: '{raw_db_titles[i]}'."
+                )
+    return True, None
+
+
+
 def validate_record_ranking_pairing(project, rankings):
     """Validate that uploaded rankings align with the project database.
 
@@ -146,13 +197,6 @@ def validate_record_ranking_pairing(project, rankings):
     Returns:
         (True, None) if valid, or (False, error_message) if not.
     """
-    import re
-
-    def normalize_title(title):
-        if not title:
-            return ""
-        return re.sub(r"\s+", " ", title.strip().lower())
-
     # Build {record_id: title} from the project database
     db_records = project.db.input.get_df()
     db_titles = {
