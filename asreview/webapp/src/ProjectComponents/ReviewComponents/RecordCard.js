@@ -191,6 +191,7 @@ const RecordCard = ({
   transitionSpeed = { enter: 500, exit: 100 },
   landscape = false,
   changeDecision = true,
+  captureDuration = false,
 }) => {
   const [open, setOpen] = React.useState(true);
 
@@ -251,6 +252,7 @@ const RecordCard = ({
               landscape={landscape}
               hotkeys={hotkeys}
               changeDecision={changeDecision}
+              captureDuration={captureDuration}
             />
           </Grid>
         </Grid>

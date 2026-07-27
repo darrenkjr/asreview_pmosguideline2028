@@ -39,6 +39,8 @@ RESULTS_TABLE_COLUMNS_PANDAS_DTYPES = {
     "note": "object",
     "tags": "object",
     "user_id": "Int64",
+    "duration_raw": "Float64",
+    "duration_away": "Float64",
 }
 
 RANKING_TABLE_COLUMNS_PANDAS_DTYPES = {
@@ -211,7 +213,9 @@ class Database:
                             time FLOAT,
                             note TEXT,
                             tags JSON,
-                            user_id INTEGER)"""
+                            user_id INTEGER,
+                            duration_raw FLOAT,
+                            duration_away FLOAT)"""
         )
 
         cur.execute(
@@ -239,7 +243,9 @@ class Database:
                             (record_id INTEGER,
                             user_id INTEGER,
                             note TEXT,
-                            time FLOAT)"""
+                            time FLOAT,
+                            duration_raw FLOAT,
+                            duration_away FLOAT)"""
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_skipped_notes_record_id ON skipped_notes(record_id)"
@@ -256,7 +262,6 @@ class Database:
                 "See migration guide."
             )
         cur = self._conn.cursor()
-        column_names = cur.execute("PRAGMA table_info(results)").fetchall()
         table_names = cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table';"
         ).fetchall()
@@ -273,6 +278,12 @@ class Database:
                 f"'{' '.join(missing_tables)}'."
             )
 
+        if not self.read_only:
+            self._fix_decision_changes_schema(cur)
+            self._ensure_skipped_notes_table(cur)
+            self._migrate_duration_columns(cur)
+
+        column_names = cur.execute("PRAGMA table_info(results)").fetchall()
         column_names = [tup[1] for tup in column_names]
         missing_columns = [
             col
@@ -285,10 +296,6 @@ class Database:
                 f"{' '.join(missing_columns)}."
             )
 
-        if not self.read_only:
-            self._fix_decision_changes_schema(cur)
-            self._ensure_skipped_notes_table(cur)
-
     def _ensure_skipped_notes_table(self, cur):
         """Ensure the skipped_notes table and index exist."""
         cur.execute(
@@ -296,11 +303,31 @@ class Database:
                             (record_id INTEGER,
                             user_id INTEGER,
                             note TEXT,
-                            time FLOAT)"""
+                            time FLOAT,
+                            duration_raw FLOAT,
+                            duration_away FLOAT)"""
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_skipped_notes_record_id ON skipped_notes(record_id)"
         )
+        self._conn.commit()
+
+    def _migrate_duration_columns(self, cur):
+        """Add duration_raw and duration_away columns if absent."""
+        for table in ["results", "skipped_notes"]:
+            existing_cols = [
+                row[1] for row in cur.execute(f"PRAGMA table_info({table})")
+            ]
+            for col in ["duration_raw", "duration_away"]:
+                if col not in existing_cols:
+                    try:
+                        cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} FLOAT")
+                    except sqlite3.OperationalError as e:
+                        if (
+                            "duplicate column name" not in str(e).lower()
+                            and "already exists" not in str(e).lower()
+                        ):
+                            raise
         self._conn.commit()
 
     def _fix_decision_changes_schema(self, cur):
@@ -449,7 +476,15 @@ class Database:
             dtype=RANKING_TABLE_COLUMNS_PANDAS_DTYPES,
         )
 
-    def label_record(self, record_id, label, tags=None, user_id=None):
+    def label_record(
+        self,
+        record_id,
+        label,
+        tags=None,
+        user_id=None,
+        duration_raw=None,
+        duration_away=None,
+    ):
         if tags is not None:
             tags = json.dumps(tags)
         labeling_time = time.time()
@@ -477,12 +512,14 @@ class Database:
                 FROM results
                 WHERE record_id = :record_id
             )
-            INSERT INTO results(record_id, label, time, tags, user_id, {model_string})
-            SELECT target_group.record_id, :label, :time, :tags, :user_id, {target_result_string}
+            INSERT INTO results(record_id, label, time, tags, user_id, duration_raw, duration_away, {model_string})
+            SELECT target_group.record_id, :label, :time, :tags, :user_id, :duration_raw, :duration_away, {target_result_string}
             FROM target_group
             LEFT JOIN target_result ON 1
             ON CONFLICT(record_id) DO UPDATE
-                SET {upsert_string};
+                SET {upsert_string},
+                    duration_raw = COALESCE(results.duration_raw, excluded.duration_raw),
+                    duration_away = COALESCE(results.duration_away, excluded.duration_away);
             """,
             {
                 "record_id": record_id,
@@ -490,6 +527,8 @@ class Database:
                 "time": labeling_time,
                 "tags": tags,
                 "user_id": user_id,
+                "duration_raw": duration_raw,
+                "duration_away": duration_away,
             },
         )
         con.commit()
@@ -839,12 +878,21 @@ class Database:
 
         return pd.read_sql_query("SELECT * FROM decision_changes", self._conn)
 
-    def skip_record(self, record_id, user_id=None, note=None):
+    def skip_record(
+        self,
+        record_id,
+        user_id=None,
+        note=None,
+        duration_raw=None,
+        duration_away=None,
+    ):
         con = self._conn
         cur = con.cursor()
         cur.execute(
-            "INSERT INTO skipped_notes (record_id, user_id, note, time) VALUES (?, ?, ?, ?)",
-            (record_id, user_id, note, time.time())
+            """INSERT INTO skipped_notes
+            (record_id, user_id, note, time, duration_raw, duration_away)
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (record_id, user_id, note, time.time(), duration_raw, duration_away),
         )
         cur.execute("DELETE FROM results WHERE record_id = ?", (record_id,))
         cur.execute(

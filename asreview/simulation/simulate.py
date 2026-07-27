@@ -376,6 +376,8 @@ class Simulate:
                 "note": None,
                 "tags": None,
                 "user_id": None,
+                "duration_raw": None,
+                "duration_away": None,
             }
         )
 

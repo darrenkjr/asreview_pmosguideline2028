@@ -1837,6 +1837,14 @@ def api_label_record(project, record_id):  # noqa: F401
     if label not in [0, 1]:
         return jsonify(message="Invalid label"), 400
 
+    duration_raw = request.form.get("duration_raw", default=None, type=float)
+    duration_away = request.form.get("duration_away", default=None, type=float)
+
+    if duration_raw is not None and duration_raw < 0:
+        return jsonify(message="Invalid duration_raw"), 400
+    if duration_away is not None and duration_away < 0:
+        return jsonify(message="Invalid duration_away"), 400
+
     retrain_model = bool(request.form.get("retrain_model", default=False))
 
     user_id = (
@@ -1852,6 +1860,8 @@ def api_label_record(project, record_id):  # noqa: F401
                 label,
                 tags=tags,
                 user_id=user_id,
+                duration_raw=duration_raw,
+                duration_away=duration_away,
             )
 
     if retrain_model:
@@ -1896,12 +1906,37 @@ def api_skip_record(project, record_id):
         note = request.json.get("note")
     note = note if note and note.strip() != "" else None
 
+    duration_raw = None
+    duration_away = None
+    if request.json:
+        if "duration_raw" in request.json and request.json["duration_raw"] is not None:
+            try:
+                duration_raw = float(request.json["duration_raw"])
+            except (TypeError, ValueError):
+                return jsonify(message="Invalid duration_raw"), 400
+            if duration_raw < 0:
+                return jsonify(message="Invalid duration_raw"), 400
+
+        if "duration_away" in request.json and request.json["duration_away"] is not None:
+            try:
+                duration_away = float(request.json["duration_away"])
+            except (TypeError, ValueError):
+                return jsonify(message="Invalid duration_away"), 400
+            if duration_away < 0:
+                return jsonify(message="Invalid duration_away"), 400
+
     user_id = (
         current_user.id if current_app.config.get("AUTHENTICATION", True) else None
     )
 
     with project.db as db:
-        db.skip_record(record_id, user_id, note)
+        db.skip_record(
+            record_id,
+            user_id=user_id,
+            note=note,
+            duration_raw=duration_raw,
+            duration_away=duration_away,
+        )
     return jsonify({"success": True})
 
 

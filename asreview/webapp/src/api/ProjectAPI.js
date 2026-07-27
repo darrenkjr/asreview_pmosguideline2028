@@ -763,6 +763,8 @@ class ProjectAPI {
         url: url,
         data: {
           note: variables.note || null,
+          duration_raw: variables.duration_raw ?? null,
+          duration_away: variables.duration_away ?? null,
         },
         headers: {
           "Content-Type": "application/json",
@@ -782,6 +784,20 @@ class ProjectAPI {
     let body = new FormData();
     body.set("record_id", variables.record_id);
     body.set("label", variables.label);
+
+    if (
+      variables.duration_raw !== undefined &&
+      variables.duration_raw !== null
+    ) {
+      body.set("duration_raw", variables.duration_raw);
+    }
+
+    if (
+      variables.duration_away !== undefined &&
+      variables.duration_away !== null
+    ) {
+      body.set("duration_away", variables.duration_away);
+    }
 
     if (variables.tagValues && Array.isArray(variables.tagValues)) {
       body.set("tags", JSON.stringify(variables.tagValues));

@@ -152,6 +152,7 @@ const SkipDialog = ({
   open,
   onClose,
   onDecisionClose,
+  onSkipSubmit,
 }) => {
   const queryClient = useQueryClient();
   const [noteState, setNoteState] = React.useState("");
@@ -172,10 +173,15 @@ const SkipDialog = ({
   );
 
   const handleSkip = () => {
+    let durations = {};
+    if (onSkipSubmit) {
+      durations = onSkipSubmit();
+    }
     mutate({
       project_id,
       record_id,
       note: noteState,
+      ...durations,
     });
   };
 
@@ -716,6 +722,7 @@ const RecordCardLabeler = ({
   retrainAfterDecision = true,
   changeDecision = true,
   recommendedTags = null,
+  captureDuration = false,
 }) => {
   const queryClient = useQueryClient();
   const [editState] = useToggle(!(label === 1 || label === 0));
@@ -727,6 +734,60 @@ const RecordCardLabeler = ({
   );
   const [inlineCriteriaTag, setInlineCriteriaTag] = React.useState(null);
   const [inlineCriteriaOpen, setInlineCriteriaOpen] = React.useState(false);
+
+  const startTimeRef = React.useRef(performance.now());
+  const awayAccumRef = React.useRef(0);
+  const awaySinceRef = React.useRef(null);
+  const focusedRef = React.useRef(true);
+
+  React.useEffect(() => {
+    const now = performance.now();
+    startTimeRef.current = now;
+    awayAccumRef.current = 0;
+    focusedRef.current = document.hasFocus();
+    awaySinceRef.current = document.hidden || !focusedRef.current ? now : null;
+
+    const sync = (nextFocused) => {
+      const t = performance.now();
+      if (typeof nextFocused === "boolean") focusedRef.current = nextFocused;
+      const away = document.hidden || !focusedRef.current; // considered away when current tab / document is away or current window is not focused
+      if (away && awaySinceRef.current === null) {
+        awaySinceRef.current = t; // start away timer
+      } else if (!away && awaySinceRef.current !== null) {
+        awayAccumRef.current += t - awaySinceRef.current; // calculate time accumulated in an away status
+        awaySinceRef.current = null; // reset away timer
+      }
+    };
+
+    const onVis = () => sync();
+    const onBlur = () => sync(false);
+    const onFocus = () => sync(true);
+
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [record_id]);
+
+  // Screening duration analytics: capture presentation-anchored timing for queue first decisions
+  const computeDurations = React.useCallback(() => {
+    if (!captureDuration || !editState) {
+      return {};
+    }
+    const now = performance.now();
+    if (awaySinceRef.current !== null) {
+      awayAccumRef.current += now - awaySinceRef.current;
+      awaySinceRef.current = null;
+    }
+    const duration_raw = (now - startTimeRef.current) / 1000;
+    const duration_away = awayAccumRef.current / 1000;
+    return { duration_raw, duration_away };
+  }, [captureDuration, editState]);
+
   const handleInlineCriteriaClick = (tag) => {
     setInlineCriteriaTag(tag);
     setInlineCriteriaOpen(true);
@@ -802,6 +863,7 @@ const RecordCardLabeler = ({
       tagValues: tagValuesState,
       retrain_model: retrainAfterDecision,
       post: editState,
+      ...computeDurations(),
     });
   };
 
@@ -818,6 +880,7 @@ const RecordCardLabeler = ({
       tagValues: clearedTags,
       retrain_model: retrainAfterDecision,
       post: editState,
+      ...computeDurations(),
     });
     setShowConfirmNotRelevant(false);
   };
@@ -842,6 +905,7 @@ const RecordCardLabeler = ({
           tagValues: clearedTags,
           retrain_model: retrainAfterDecision,
           post: editState,
+          ...computeDurations(),
         });
       }
     } else {
@@ -1409,6 +1473,7 @@ const RecordCardLabeler = ({
             open={showSkipDialog}
             onClose={toggleShowSkipDialog}
             onDecisionClose={onDecisionClose}
+            onSkipSubmit={computeDurations}
           />
           {hasTags && (
             <TagsDialog

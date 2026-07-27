@@ -183,6 +183,7 @@ const ReviewPage = () => {
                 collapseAbstract={false}
                 hotkeys={true}
                 landscape={orientation === "landscape" && !landscapeDisabled}
+                captureDuration={true}
               />
             </Stack>
           )}
