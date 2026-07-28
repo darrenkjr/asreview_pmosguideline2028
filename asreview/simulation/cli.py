@@ -231,6 +231,7 @@ def _cli_simulate(argv):
             project.add_review(reviewer=sim, status="finished")
 
             project.export(args.output)
+            project.close()
             shutil.rmtree(fp_tmp_simulation)
 
         else:
