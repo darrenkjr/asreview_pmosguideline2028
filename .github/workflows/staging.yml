@@ -6,9 +6,21 @@ on:
       - "dev"
   workflow_dispatch:
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/asreview_pmosguideline2028
+
 jobs:
-  docker:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -16,48 +28,104 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Test the local build before pushing
+      - name: Login to GitHub registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      # Build locally for testing (load into Docker daemon)
       - name: Build the image for testing
         uses: docker/build-push-action@v5
         with:
           context: .
           load: true
           tags: asreview/asreview:test
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
 
       - name: Test the built image
         run: |
           docker run asreview/asreview:test -h
 
-      # Docker Metadata Extraction
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
+      # Build and push single-platform image by digest (no tag yet)
+      # Cache is warm from the test build above, so this is nearly instant
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/asreview_pmosguideline2028
-          tags: |
-            type=raw,value=staging
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+
+      # Export the digest so the merge job can reference it
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.runner }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Merge per-platform digests into a single multi-arch manifest
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub registry
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Final Build and Push
-      - name: Build and push staging image
-        uses: docker/build-push-action@v5
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }},ghcr.io/${{ github.repository_owner }}/asreview_pmosguideline2028:staging
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=staging
+
+      # Create and push the multi-arch manifest list
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging
