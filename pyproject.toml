@@ -139,7 +139,7 @@ n_consecutive_irrelevant = "asreview.models.stoppers:NConsecutiveIrrelevant"
 statistical_buscarpy = "asreview.models.stoppers:StatisticalBuscarpy"
 
 [project.optional-dependencies]
-lint = ["ruff", "check-manifest"]
+lint = ["ruff<0.16", "check-manifest"]
 test = [
     "coverage",
     "pytest",
