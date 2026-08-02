@@ -272,14 +272,41 @@ class ProjectAPI {
     });
   }
 
+  static fetchProjectUsers({ queryKey }) {
+    const { project_id } = queryKey[1];
+    const url = api_url + `projects/${project_id}/users`;
+    return new Promise((resolve, reject) => {
+      axios
+        .get(url, { withCredentials: true })
+        .then((result) =>
+          resolve(Array.isArray(result.data) ? result.data : []),
+        )
+        .catch((error) => {
+          if (
+            error.response &&
+            (error.response.status === 404 || error.response.status === 401)
+          ) {
+            resolve([]);
+          } else {
+            reject(axiosErrorHandler(error));
+          }
+        });
+    });
+  }
+
   static fetchLabeledRecord({ pageParam = 1, queryKey }) {
-    const { project_id, subset, filter } = queryKey[1];
+    const { project_id, subset, filter, user_id } = queryKey[1];
 
     const url = api_url + `projects/${project_id}/labeled`;
     return new Promise((resolve, reject) => {
       axios
         .get(url, {
-          params: { subset: subset, filter: filter, page: pageParam },
+          params: {
+            subset: subset,
+            filter: filter,
+            user_id: user_id,
+            page: pageParam,
+          },
           paramsSerializer: (params) => {
             return qs.stringify(params, { arrayFormat: "repeat" });
           },
@@ -850,9 +877,51 @@ class ProjectAPI {
 
     return new Promise((resolve, reject) => {
       axios({
+        method: "post",
+        url: url,
+        data: body,
+        withCredentials: true,
+      })
+        .then((result) => {
+          resolve(result["data"]);
+        })
+        .catch((error) => {
+          reject(axiosErrorHandler(error));
+        });
+    });
+  }
+
+  static mutateEditNote(variables) {
+    let body = new FormData();
+    body.set("note", variables.note);
+
+    const url =
+      api_url + `projects/${variables.project_id}/note/${variables.note_id}`;
+
+    return new Promise((resolve, reject) => {
+      axios({
         method: "put",
         url: url,
         data: body,
+        withCredentials: true,
+      })
+        .then((result) => {
+          resolve(result["data"]);
+        })
+        .catch((error) => {
+          reject(axiosErrorHandler(error));
+        });
+    });
+  }
+
+  static mutateDeleteNote(variables) {
+    const url =
+      api_url + `projects/${variables.project_id}/note/${variables.note_id}`;
+
+    return new Promise((resolve, reject) => {
+      axios({
+        method: "delete",
+        url: url,
         withCredentials: true,
       })
         .then((result) => {

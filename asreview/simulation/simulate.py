@@ -378,6 +378,7 @@ class Simulate:
                 "user_id": None,
                 "duration_raw": None,
                 "duration_away": None,
+                "duration_user_attribution": None
             }
         )
 

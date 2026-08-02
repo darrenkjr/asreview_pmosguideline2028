@@ -39,6 +39,7 @@ import TimeAgo from "javascript-time-ago";
 
 import {
   DeleteOutline,
+  EditOutlined,
   InfoOutlined,
   LabelOutlined,
   SkipNextOutlined,
@@ -71,26 +72,21 @@ const mergeTagValues = (tagsForm, tagValues) => {
   });
 };
 
-const NoteDialog = ({ project_id, record_id, open, onClose, note = null }) => {
+const NoteDialog = ({ project_id, record_id, open, onClose }) => {
   const queryClient = useQueryClient();
 
-  const [noteState, setNoteState] = React.useState(note);
+  const [noteState, setNoteState] = React.useState("");
+
+  React.useEffect(() => {
+    if (open) {
+      setNoteState("");
+    }
+  }, [open]);
 
   const { isError, isLoading, mutate } = useMutation(ProjectAPI.mutateNote, {
     onSuccess: () => {
       queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
-      queryClient.setQueryData(["fetchRecord", { project_id }], (data) => {
-        return {
-          ...data,
-          result: {
-            ...data.result,
-            state: {
-              ...data.result.state,
-              note: noteState,
-            },
-          },
-        };
-      });
+      queryClient.invalidateQueries(["fetchRecord", { project_id }]);
       onClose();
     },
   });
@@ -111,15 +107,9 @@ const NoteDialog = ({ project_id, record_id, open, onClose, note = null }) => {
           fullWidth
           multiline
           onChange={(event) => setNoteState(event.target.value)}
-          onFocus={(e) =>
-            e.currentTarget.setSelectionRange(
-              e.currentTarget.value.length,
-              e.currentTarget.value.length,
-            )
-          } // bug https://github.com/mui/material-ui/issues/12779
           placeholder="Write a note for this record..."
           rows={4}
-          value={noteState ? noteState : ""}
+          value={noteState}
           error={isError}
           disabled={isLoading}
         />
@@ -137,7 +127,74 @@ const NoteDialog = ({ project_id, record_id, open, onClose, note = null }) => {
             });
           }}
           color="primary"
-          disabled={isLoading || noteState === note}
+          disabled={isLoading || !noteState || noteState.trim() === ""}
+        >
+          Save
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+const EditNoteDialog = ({ project_id, note, open, onClose }) => {
+  const queryClient = useQueryClient();
+
+  const [noteState, setNoteState] = React.useState(note?.text || "");
+
+  React.useEffect(() => {
+    if (note) {
+      setNoteState(note.text || "");
+    }
+  }, [note]);
+
+  const { isError, isLoading, mutate } = useMutation(
+    ProjectAPI.mutateEditNote,
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
+        queryClient.invalidateQueries(["fetchRecord", { project_id }]);
+        onClose();
+      },
+    },
+  );
+
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth disableRestoreFocus>
+      <DialogTitle>Edit note</DialogTitle>
+      <DialogContent>
+        <TextField
+          autoComplete="off"
+          id="edit-record-note"
+          autoFocus
+          fullWidth
+          multiline
+          onChange={(event) => setNoteState(event.target.value)}
+          placeholder="Edit your note..."
+          rows={4}
+          value={noteState}
+          error={isError}
+          disabled={isLoading}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} color="primary">
+          Cancel
+        </Button>
+        <Button
+          onClick={() => {
+            mutate({
+              project_id: project_id,
+              note_id: note.id,
+              note: noteState,
+            });
+          }}
+          color="primary"
+          disabled={
+            isLoading ||
+            !noteState ||
+            noteState.trim() === "" ||
+            noteState === note?.text
+          }
         >
           Save
         </Button>
@@ -793,21 +850,18 @@ const RecordCardLabeler = ({
     setInlineCriteriaOpen(true);
   };
 
+  const [editingNote, setEditingNote] = React.useState(null);
+
+  const deleteNoteMutation = useMutation(ProjectAPI.mutateDeleteNote, {
+    onSuccess: () => {
+      queryClient.invalidateQueries(["fetchLabeledRecord", { project_id }]);
+      queryClient.invalidateQueries(["fetchRecord", { project_id }]);
+    },
+  });
+
   const allNotes = React.useMemo(() => {
-    if (notes && notes.length > 0) {
-      return notes;
-    }
-    if (note && typeof note === "string" && note.trim() !== "") {
-      return [
-        {
-          user: user || { name: "Reviewer", email: "", current_user: true },
-          time: labelTime,
-          text: note,
-        },
-      ];
-    }
-    return [];
-  }, [note, notes, user, labelTime]);
+    return notes || [];
+  }, [notes]);
 
   const { error, isError, isLoading, mutate, isSuccess } = useMutation(
     ProjectAPI.mutateClassification,
@@ -840,6 +894,7 @@ const RecordCardLabeler = ({
   const [dialogLabel, setDialogLabel] = React.useState(label);
   const [showConfirmNotRelevant, setShowConfirmNotRelevant] =
     React.useState(false);
+  const isNotRelevantDisabled = isLoading || isSuccess || isAnyTagChecked;
 
   const handleInlineAutocompleteChange = (groupId, newSelectedTags) => {
     let groupI = tagValuesState.findIndex((group) => group.id === groupId);
@@ -924,7 +979,7 @@ const RecordCardLabeler = ({
   const openMenu = Boolean(anchorEl);
 
   useHotkeys("r", () => hotkeys && !isRelevantDisabled && makeDecision(1));
-  useHotkeys("i", () => hotkeys && !isLoading && !isSuccess && makeDecision(0));
+  useHotkeys("i", () => hotkeys && !isNotRelevantDisabled && makeDecision(0));
   useHotkeys(
     "n",
     () => hotkeys && !isLoading && !isSuccess && toggleShowNotesDialog(),
@@ -1154,31 +1209,79 @@ const RecordCardLabeler = ({
                     <Divider />
                     <Stack spacing={2}>
                       {allNotes.map((noteItem, idx) => (
-                        <Box key={idx}>
+                        <Box key={noteItem.id || idx}>
                           <Stack
                             direction="row"
                             spacing={1}
                             alignItems="center"
+                            justifyContent="space-between"
                             sx={{ mb: 0.5 }}
                           >
-                            <Typography
-                              variant="subtitle2"
-                              sx={{ fontWeight: "bold", color: "primary.main" }}
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              alignItems="center"
                             >
-                              {noteItem.user
-                                ? noteItem.user.current_user
-                                  ? "You"
-                                  : noteItem.user.name
-                                : "Anonymous"}
-                            </Typography>
-                            {noteItem.time && (
                               <Typography
-                                variant="caption"
-                                color="text.secondary"
+                                variant="subtitle2"
+                                sx={{
+                                  fontWeight: "bold",
+                                  color: "primary.main",
+                                }}
                               >
-                                •{" "}
-                                {timeAgo.format(new Date(noteItem.time * 1000))}
+                                {noteItem.user
+                                  ? noteItem.user.current_user
+                                    ? "You"
+                                    : noteItem.user.name
+                                  : "Anonymous"}
                               </Typography>
+                              {noteItem.created_at && (
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                >
+                                  •{" "}
+                                  {timeAgo.format(
+                                    new Date(noteItem.created_at * 1000),
+                                  )}
+                                </Typography>
+                              )}
+                              {noteItem.edited_at && (
+                                <Typography
+                                  variant="caption"
+                                  color="text.secondary"
+                                  sx={{ fontStyle: "italic" }}
+                                >
+                                  (edited{" "}
+                                  {timeAgo.format(
+                                    new Date(noteItem.edited_at * 1000),
+                                  )}
+                                  )
+                                </Typography>
+                              )}
+                            </Stack>
+                            {noteItem.user?.current_user && noteItem.id && (
+                              <Stack direction="row" spacing={0.5}>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => setEditingNote(noteItem)}
+                                  title="Edit note"
+                                >
+                                  <EditOutlined fontSize="small" />
+                                </IconButton>
+                                <IconButton
+                                  size="small"
+                                  onClick={() =>
+                                    deleteNoteMutation.mutate({
+                                      project_id,
+                                      note_id: noteItem.id,
+                                    })
+                                  }
+                                  title="Delete note"
+                                >
+                                  <DeleteOutline fontSize="small" />
+                                </IconButton>
+                              </Stack>
                             )}
                           </Stack>
                           <Typography
@@ -1277,7 +1380,11 @@ const RecordCardLabeler = ({
                 </Button>
               </Tooltip>
               <Tooltip
-                title="Label as irrelevant (keyboard shortcut: I)"
+                title={
+                  isAnyTagChecked
+                    ? "The record has selected tags / topics - remove these tags to mark as not relevant"
+                    : "Label as irrelevant (keyboard shortcut: I)"
+                }
                 enterDelay={2000}
                 leaveDelay={200}
                 placement="bottom"
@@ -1286,7 +1393,7 @@ const RecordCardLabeler = ({
                   id="irrelevant"
                   onClick={() => makeDecision(0)}
                   startIcon={<NotInterestedOutlinedIcon />}
-                  disabled={isLoading || isSuccess}
+                  disabled={isNotRelevantDisabled}
                   variant="contained"
                   color="grey.600"
                 >
@@ -1465,7 +1572,12 @@ const RecordCardLabeler = ({
             record_id={record_id}
             open={showNotesDialog}
             onClose={toggleShowNotesDialog}
-            note={note}
+          />
+          <EditNoteDialog
+            project_id={project_id}
+            note={editingNote}
+            open={Boolean(editingNote)}
+            onClose={() => setEditingNote(null)}
           />
           <SkipDialog
             project_id={project_id}

@@ -11,7 +11,7 @@ from asreview.database.store import _build_conn_uri
 
 __all__ = ["Database"]
 
-CURRENT_DATABASE_VERSION = 3
+CURRENT_DATABASE_VERSION = 4
 
 MODEL_COLUMNS = [
     "classifier",
@@ -25,6 +25,8 @@ REQUIRED_TABLES = [
     "results",
     "last_ranking",
     "decision_changes",
+    "skipped_records",
+    "record_notes",
 ]
 
 RESULTS_TABLE_COLUMNS_PANDAS_DTYPES = {
@@ -39,6 +41,7 @@ RESULTS_TABLE_COLUMNS_PANDAS_DTYPES = {
     "note": "object",
     "tags": "object",
     "user_id": "Int64",
+    "duration_user_attribution": "Int64",
     "duration_raw": "Float64",
     "duration_away": "Float64",
 }
@@ -214,6 +217,7 @@ class Database:
                             note TEXT,
                             tags JSON,
                             user_id INTEGER,
+                            duration_user_attribution INTEGER,
                             duration_raw FLOAT,
                             duration_away FLOAT)"""
         )
@@ -231,7 +235,7 @@ class Database:
         )
 
         cur.execute(
-            """CREATE TABLE decision_changes
+            """CREATE TABLE IF NOT EXISTS decision_changes
                             (record_id INTEGER,
                             label INTEGER,
                             time FLOAT,
@@ -239,16 +243,27 @@ class Database:
         )
 
         cur.execute(
-            """CREATE TABLE IF NOT EXISTS skipped_notes
+            """CREATE TABLE IF NOT EXISTS skipped_records
                             (record_id INTEGER,
                             user_id INTEGER,
-                            note TEXT,
                             time FLOAT,
                             duration_raw FLOAT,
                             duration_away FLOAT)"""
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_skipped_notes_record_id ON skipped_notes(record_id)"
+            "CREATE INDEX IF NOT EXISTS idx_skipped_records_record_id ON skipped_records(record_id)"
+        )
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS record_notes
+                            (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            record_id INTEGER NOT NULL,
+                            user_id INTEGER,
+                            note TEXT NOT NULL,
+                            created_at FLOAT NOT NULL,
+                            edited_at FLOAT)"""
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_record_notes_record_id ON record_notes(record_id)"
         )
 
         self._conn.commit()
@@ -256,12 +271,20 @@ class Database:
         self._set_results_changes_triggers()
 
     def _is_valid(self):
+        cur = self._conn.cursor()
+        if not self.read_only:
+            self._fix_decision_changes_schema(cur)
+            self._migrate_notes_and_rename_tables(cur)
+            self._ensure_skipped_records_table(cur)
+            self._ensure_record_notes_table(cur)
+            self._migrate_duration_columns(cur)
+
         if self.user_version != CURRENT_DATABASE_VERSION:
             raise ValueError(
                 f"Database version {self.user_version} is not supported. "
                 "See migration guide."
             )
-        cur = self._conn.cursor()
+
         table_names = cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table';"
         ).fetchall()
@@ -278,11 +301,6 @@ class Database:
                 f"'{' '.join(missing_tables)}'."
             )
 
-        if not self.read_only:
-            self._fix_decision_changes_schema(cur)
-            self._ensure_skipped_notes_table(cur)
-            self._migrate_duration_columns(cur)
-
         column_names = cur.execute("PRAGMA table_info(results)").fetchall()
         column_names = [tup[1] for tup in column_names]
         missing_columns = [
@@ -296,25 +314,107 @@ class Database:
                 f"{' '.join(missing_columns)}."
             )
 
-    def _ensure_skipped_notes_table(self, cur):
-        """Ensure the skipped_notes table and index exist."""
+    def _ensure_skipped_records_table(self, cur):
+        """Ensure the skipped_records table and index exist."""
         cur.execute(
-            """CREATE TABLE IF NOT EXISTS skipped_notes
+            """CREATE TABLE IF NOT EXISTS skipped_records
                             (record_id INTEGER,
                             user_id INTEGER,
-                            note TEXT,
                             time FLOAT,
                             duration_raw FLOAT,
                             duration_away FLOAT)"""
         )
         cur.execute(
-            "CREATE INDEX IF NOT EXISTS idx_skipped_notes_record_id ON skipped_notes(record_id)"
+            "CREATE INDEX IF NOT EXISTS idx_skipped_records_record_id ON skipped_records(record_id)"
         )
         self._conn.commit()
 
+    def _ensure_record_notes_table(self, cur):
+        """Ensure the record_notes table and index exist."""
+        cur.execute(
+            """CREATE TABLE IF NOT EXISTS record_notes
+                            (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            record_id INTEGER NOT NULL,
+                            user_id INTEGER,
+                            note TEXT NOT NULL,
+                            created_at FLOAT NOT NULL,
+                            edited_at FLOAT)"""
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_record_notes_record_id ON record_notes(record_id)"
+        )
+        self._conn.commit()
+
+    def _migrate_notes_and_rename_tables(self, cur):
+        """Migrate legacy notes to record_notes and rename skipped_notes to skipped_records."""
+        if self.user_version >= 4:
+            return
+        if not cur.execute("PRAGMA table_info(results)").fetchall():
+            return None
+
+        with self._conn:
+            self._ensure_record_notes_table(cur)
+            table_names = [r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+
+            if "skipped_notes" in table_names:
+                # Copy legacy skip notes into record_notes
+                cur.execute(
+                    """INSERT INTO record_notes (record_id, user_id, note, created_at, edited_at)
+                    SELECT record_id, user_id, note, time, NULL
+                    FROM skipped_notes
+                    WHERE note IS NOT NULL AND TRIM(note) != ''"""
+                )
+                if "skipped_records" not in table_names:
+                    cur.execute("ALTER TABLE skipped_notes RENAME TO skipped_records")
+                
+                # Ensure skipped_records has note column dropped
+                skipped_cols = [r[1] for r in cur.execute("PRAGMA table_info(skipped_records)").fetchall()]
+                if "note" in skipped_cols:
+                    try:
+                        cur.execute("ALTER TABLE skipped_records DROP COLUMN note")
+                    except sqlite3.OperationalError:
+                        cur.execute("""CREATE TABLE skipped_records_new
+                            (record_id INTEGER, user_id INTEGER, time FLOAT, duration_raw FLOAT, duration_away FLOAT)""")
+                        cur.execute("""INSERT INTO skipped_records_new
+                            SELECT record_id, user_id, time, duration_raw, duration_away FROM skipped_records""")
+                        cur.execute("DROP TABLE skipped_records")
+                        cur.execute("ALTER TABLE skipped_records_new RENAME TO skipped_records")
+                        cur.execute("CREATE INDEX IF NOT EXISTS idx_skipped_records_record_id ON skipped_records(record_id)")
+            else:
+                self._ensure_skipped_records_table(cur)
+
+            # Copy legacy label notes from results into record_notes
+            cur.execute(
+                """INSERT INTO record_notes (record_id, user_id, note, created_at, edited_at)
+                SELECT record_id, user_id, note, time, NULL
+                FROM results
+                WHERE note IS NOT NULL AND TRIM(note) != ''"""
+            )
+
+            cur.execute("PRAGMA user_version = 4")
+
     def _migrate_duration_columns(self, cur):
-        """Add duration_raw and duration_away columns if absent."""
-        for table in ["results", "skipped_notes"]:
+        """Add duration_user_attribution, duration_raw and duration_away columns if absent."""
+        existing_cols = [
+            row[1] for row in cur.execute("PRAGMA table_info(results)")
+        ]
+
+        if not existing_cols: 
+            return None 
+
+
+        if "duration_user_attribution" not in existing_cols:
+            try:
+                cur.execute("ALTER TABLE results ADD COLUMN duration_user_attribution INTEGER")
+                cur.execute("UPDATE results SET duration_user_attribution = user_id WHERE duration_user_attribution IS NULL AND user_id IS NOT NULL")
+            except sqlite3.OperationalError as e:
+                if (
+                    "duplicate column name" not in str(e).lower()
+                    and "already exists" not in str(e).lower()
+                ):
+                    raise
+
+        for table in ["results", "skipped_records"]:
             existing_cols = [
                 row[1] for row in cur.execute(f"PRAGMA table_info({table})")
             ]
@@ -338,6 +438,8 @@ class Database:
         may still carry the old schema.
         """
         columns = [row[1] for row in cur.execute("PRAGMA table_info(decision_changes)")]
+        if not columns: 
+            return None
 
         if "new_label" in columns and "label" not in columns:
             cur.execute("ALTER TABLE decision_changes RENAME COLUMN new_label TO label")
@@ -512,12 +614,13 @@ class Database:
                 FROM results
                 WHERE record_id = :record_id
             )
-            INSERT INTO results(record_id, label, time, tags, user_id, duration_raw, duration_away, {model_string})
-            SELECT target_group.record_id, :label, :time, :tags, :user_id, :duration_raw, :duration_away, {target_result_string}
+            INSERT INTO results(record_id, label, time, tags, user_id, duration_user_attribution, duration_raw, duration_away, {model_string})
+            SELECT target_group.record_id, :label, :time, :tags, :user_id, :user_id, :duration_raw, :duration_away, {target_result_string}
             FROM target_group
             LEFT JOIN target_result ON 1
             ON CONFLICT(record_id) DO UPDATE
                 SET {upsert_string},
+                    duration_user_attribution = COALESCE(results.duration_user_attribution, excluded.duration_user_attribution),
                     duration_raw = COALESCE(results.duration_raw, excluded.duration_raw),
                     duration_away = COALESCE(results.duration_away, excluded.duration_away);
             """,
@@ -605,39 +708,7 @@ class Database:
         )
         con.commit()
 
-    def update_note(self, record_id, note=None):
-        """Change the note of an already labeled or pending record.
 
-        Parameters
-        ----------
-        record_id: int
-            Id of the record whose label should be changed.
-        note: str
-            Note to add to the record.
-        """
-
-        cur = self._conn.cursor()
-        cur.execute(
-            f"""
-            WITH target_group AS (
-                SELECT record_id
-                FROM {self.record_table_name}
-                WHERE group_id = (
-                    SELECT group_id
-                    FROM {self.record_table_name}
-                    WHERE record_id=:record_id
-                )
-            )
-            UPDATE results SET note = :note WHERE record_id IN (
-                SELECT record_id FROM target_group
-            )""",
-            {"note": note, "record_id": record_id},
-        )
-
-        if cur.rowcount == 0:
-            raise ValueError(f"Record with id {record_id} not found.")
-
-        self._conn.commit()
 
     def delete_result(self, record_id):
         con = self._conn
@@ -882,17 +953,16 @@ class Database:
         self,
         record_id,
         user_id=None,
-        note=None,
         duration_raw=None,
         duration_away=None,
     ):
         con = self._conn
         cur = con.cursor()
         cur.execute(
-            """INSERT INTO skipped_notes
-            (record_id, user_id, note, time, duration_raw, duration_away)
-            VALUES (?, ?, ?, ?, ?, ?)""",
-            (record_id, user_id, note, time.time(), duration_raw, duration_away),
+            """INSERT INTO skipped_records
+            (record_id, user_id, time, duration_raw, duration_away)
+            VALUES (?, ?, ?, ?, ?)""",
+            (record_id, user_id, time.time(), duration_raw, duration_away),
         )
         cur.execute("DELETE FROM results WHERE record_id = ?", (record_id,))
         cur.execute(
@@ -903,44 +973,114 @@ class Database:
         )
         con.commit()
 
-    def get_skip_notes(self, record_id):
-        con = self._conn
-        cur = con.cursor()
-        res = cur.execute(
-            "SELECT user_id, note, time FROM skipped_notes WHERE record_id = ? ORDER BY time ASC",
-            (record_id,)
-        ).fetchall()
-        return [{"user_id": r[0], "note": r[1], "time": r[2]} for r in res]
+    def get_skipped_table(self, user_ids=None):
+        """Get table of all skipped records with their latest skip state."""
+        if user_ids:
+            placeholders = ",".join("?" for _ in user_ids)
+            query = f"""
+                SELECT record_id, user_id, MAX(time) as time, NULL as label
+                FROM skipped_records
+                WHERE user_id IN ({placeholders})
+                GROUP BY record_id
+                HAVING record_id NOT IN (
+                    SELECT record_id 
+                    FROM results 
+                    WHERE label IS NOT NULL
+                )
+                ORDER BY time ASC
+            """
+            return pd.read_sql_query(query, self._conn, params=user_ids)
+        else:
+            query = """
+                SELECT record_id, user_id, MAX(time) as time, NULL as label
+                FROM skipped_records
+                GROUP BY record_id
+                HAVING record_id NOT IN (
+                    SELECT record_id 
+                    FROM results 
+                    WHERE label IS NOT NULL
+                )
+                ORDER BY time ASC
+            """
+            return pd.read_sql_query(query, self._conn)
 
-    def get_skip_notes_batch(self, record_ids):
-        if not record_ids:
-            return {}
+    def add_record_note(self, record_id, user_id, note):
+        """Add a new note row for a record."""
         con = self._conn
         cur = con.cursor()
-        placeholders = ",".join("?" for _ in record_ids)
+        cur.execute(
+            """INSERT INTO record_notes (record_id, user_id, note, created_at, edited_at)
+            VALUES (?, ?, ?, ?, NULL)""",
+            (record_id, user_id, note, time.time()),
+        )
+        con.commit()
+        return cur.lastrowid
+
+    def edit_record_note(self, note_id, user_id, note, auth_enabled=True):
+        """Overwrite text and set edited_at for a specific note ID."""
+        con = self._conn
+        cur = con.cursor()
+        if auth_enabled and user_id is not None:
+            cur.execute(
+                "UPDATE record_notes SET note = ?, edited_at = ? WHERE id = ? AND user_id = ?",
+                (note, time.time(), note_id, user_id),
+            )
+        else:
+            cur.execute(
+                "UPDATE record_notes SET note = ?, edited_at = ? WHERE id = ?",
+                (note, time.time(), note_id),
+            )
+        con.commit()
+        return cur.rowcount > 0
+
+    def delete_record_note(self, note_id, user_id=None, auth_enabled=True):
+        """Hard delete a note by ID."""
+        con = self._conn
+        cur = con.cursor()
+        if auth_enabled and user_id is not None:
+            cur.execute(
+                "DELETE FROM record_notes WHERE id = ? AND user_id = ?",
+                (note_id, user_id),
+            )
+        else:
+            cur.execute(
+                "DELETE FROM record_notes WHERE id = ?",
+                (note_id,),
+            )
+        con.commit()
+        return cur.rowcount > 0
+
+    def get_record_notes(self, record_ids):
+        """Get notes for a single record_id or a list/collection of record_ids.
+
+        If passed a single record_id (int/str), returns a list of notes ordered by created_at ASC.
+        If passed a list/collection of record_ids, returns a dict mapping record_id -> list of notes.
+        """
+        is_single = isinstance(record_ids, (int, str)) or not hasattr(record_ids, "__iter__")
+        ids = [int(record_ids)] if is_single else [int(i) for i in record_ids]
+
+        if not ids:
+            return [] if is_single else {}
+
+        con = self._conn
+        cur = con.cursor()
+        placeholders = ",".join("?" for _ in ids)
         res = cur.execute(
-            f"SELECT record_id, user_id, note, time FROM skipped_notes WHERE record_id IN ({placeholders}) ORDER BY time ASC",
-            record_ids
+            f"SELECT id, record_id, user_id, note, created_at, edited_at FROM record_notes WHERE record_id IN ({placeholders}) ORDER BY created_at ASC",
+            ids,
         ).fetchall()
-        
+
         notes_by_record = {}
         for r in res:
-            notes_by_record.setdefault(r[0], []).append(
-                {"user_id": r[1], "note": r[2], "time": r[3]}
-            )
-        return notes_by_record
+            notes_by_record.setdefault(r[1], []).append({
+                "id": r[0],
+                "record_id": r[1],
+                "user_id": r[2],
+                "note": r[3],
+                "created_at": r[4],
+                "edited_at": r[5],
+            })
 
-    def get_skipped_table(self):
-        """Get table of all skipped records with their latest skip state."""
-        query = """
-            SELECT record_id, NULL as user_id, NULL as note, MAX(time) as time, NULL as label
-            FROM skipped_notes
-            GROUP BY record_id
-            HAVING record_id NOT IN (
-                SELECT record_id 
-                FROM results 
-                WHERE label IS NOT NULL
-            )
-            ORDER BY time ASC
-        """
-        return pd.read_sql_query(query, self._conn)
+        if is_single:
+            return notes_by_record.get(ids[0], [])
+        return notes_by_record

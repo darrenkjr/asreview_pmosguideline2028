@@ -3,10 +3,10 @@ import { Autocomplete, Checkbox, IconButton, InputBase } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import * as React from "react";
 
-const historyFilterOptions = [
-  { value: "has_note", label: "Contains note" },
-  { value: "is_prior", label: "Prior knowledge" },
-  { value: "exclude_prior", label: "Labeled" },
+const staticFilterOptions = [
+  { value: "has_note", label: "Contains note", group: "Filters" },
+  { value: "is_prior", label: "Prior knowledge", group: "Filters" },
+  { value: "exclude_prior", label: "Labeled", group: "Filters" },
 ];
 
 const PREFIX = "Filter";
@@ -34,6 +34,20 @@ export default function Filter(props) {
     filterInput.current.focus();
   };
 
+  const userOptions = React.useMemo(() => {
+    if (!Array.isArray(props.users) || props.users.length === 0) return [];
+    return props.users.map((u) => ({
+      value: `user_${u.id}`,
+      label: u.name || `User ${u.id}`,
+      group: "Users",
+    }));
+  }, [props.users]);
+
+  const options = React.useMemo(
+    () => [...staticFilterOptions, ...userOptions],
+    [userOptions],
+  );
+
   return (
     <Root>
       <IconButton className={classes.icon} onClick={onClickFilter}>
@@ -47,7 +61,8 @@ export default function Filter(props) {
         filterSelectedOptions
         multiple
         openOnFocus
-        options={historyFilterOptions}
+        options={options}
+        groupBy={(option) => option.group}
         getOptionLabel={(option) => option.label}
         renderOption={(props, option, { selected }) => (
           <li {...props} key={option.value}>

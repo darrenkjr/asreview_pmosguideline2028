@@ -123,7 +123,10 @@ const RecordCardModelTraining = ({ record, modelLogLevel, sx }) => {
       return record?.state?.label === 1 || record?.state?.label === 0
         ? "This record was presented in a random manner"
         : "This record is presented in a random manner";
-    } else if (record?.state?.querier === null) {
+    } else if (
+      record?.state?.querier === null &&
+      (record?.state?.label === 1 || record?.state?.label === 0)
+    ) {
       return "This record was labeled either through manual search or the label was already available in the dataset";
     }
     return null;

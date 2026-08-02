@@ -106,6 +106,10 @@ def _migrate_decision_changes_table(project):
     cur = conn.cursor()
 
     columns = [row[1] for row in cur.execute("PRAGMA table_info(decision_changes)")]
+    if not columns: 
+        # no column found - this is a fresh database
+        conn.close()
+        return None
 
     if "new_label" in columns and "label" not in columns:
         cur.execute("ALTER TABLE decision_changes RENAME COLUMN new_label TO label")

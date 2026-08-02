@@ -42,8 +42,38 @@ const LabelHistory = ({
 
   const isFinished = projectStatusData?.status === projectStatuses.FINISHED;
 
-  const [label, setLabel] = React.useState("relevant");
+  const [label, setLabel] = React.useState("all");
   const [state, setState] = React.useState(filterQuery);
+
+  const { data: usersData } = useQuery(
+    ["fetchProjectUsers", { project_id }],
+    ProjectAPI.fetchProjectUsers,
+    {
+      refetchOnWindowFocus: false,
+    },
+  );
+
+  const initializedUserFilter = React.useRef(false);
+
+  React.useEffect(() => {
+    if (
+      Array.isArray(usersData) &&
+      usersData.length > 0 &&
+      !initializedUserFilter.current
+    ) {
+      const meUser = usersData.find((u) => u.me);
+      if (meUser) {
+        setState((prev) => {
+          if (prev.some((f) => f.value.startsWith("user_"))) return prev;
+          return [
+            ...prev,
+            { value: `user_${meUser.id}`, label: meUser.name, group: "Users" },
+          ];
+        });
+      }
+      initializedUserFilter.current = true;
+    }
+  }, [usersData]);
 
   const showMobileFilterRow = mobileScreen && showFilter;
 
@@ -71,6 +101,14 @@ const LabelHistory = ({
               justifyContent="center"
             >
               <Chip
+                label={"Full labeled history"}
+                color="primary"
+                variant={label !== "all" ? "outlined" : "filled"}
+                onClick={() => {
+                  setLabel("all");
+                }}
+              />
+              <Chip
                 label={
                   !n_prior_inclusions
                     ? "Relevant"
@@ -94,6 +132,7 @@ const LabelHistory = ({
                   setLabel("irrelevant");
                 }}
               />
+              {/*
               <Chip
                 label="Skipped"
                 color="warning"
@@ -102,18 +141,15 @@ const LabelHistory = ({
                   setLabel("skipped");
                 }}
               />
-              <Chip
-                label={"Full history"}
-                color="primary"
-                variant={label !== "all" ? "outlined" : "filled"}
-                onClick={() => {
-                  setLabel("all");
-                }}
-              />
+              */}
             </Stack>
             {!mobileScreen && showFilter && (
               <Box sx={{ flexGrow: 1, minWidth: "200px" }}>
-                <Filter filterQuery={state} setFilterQuery={setState} />
+                <Filter
+                  filterQuery={state}
+                  setFilterQuery={setState}
+                  users={usersData}
+                />
               </Box>
             )}
           </Stack>
@@ -159,7 +195,11 @@ const LabelHistory = ({
               justifyContent="space-between"
             >
               <Box sx={{ flexGrow: 1, mr: 1 }}>
-                <Filter filterQuery={state} setFilterQuery={setState} />
+                <Filter
+                  filterQuery={state}
+                  setFilterQuery={setState}
+                  users={usersData}
+                />
               </Box>
               {showExport && (
                 <IconButton
@@ -188,6 +228,7 @@ const LabelHistory = ({
           mode={mode}
           label={label}
           filterQuery={state}
+          setFilterQuery={setState}
         />
       </Container>
       {showExport && (

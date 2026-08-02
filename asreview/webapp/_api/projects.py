@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from asreview import extensions
 from types import NoneType, UnionType
 import base64
 import hashlib
@@ -80,7 +81,7 @@ from asreview.webapp._api.utils import read_tags_data, read_topic_rankings, vali
 from asreview.webapp._authentication.decorators import current_user_projects
 from asreview.webapp._authentication.decorators import login_required
 from asreview.webapp._authentication.decorators import project_authorization
-from asreview.webapp._authentication.models import Project
+from asreview.webapp._authentication.models import Project, User
 from asreview.webapp._task_manager.task_manager import DEFAULT_TASK_MANAGER_HOST
 from asreview.webapp._task_manager.task_manager import DEFAULT_TASK_MANAGER_PORT
 from asreview.webapp._tasks import run_model
@@ -100,35 +101,40 @@ except importlib.metadata.PackageNotFoundError:
 bp = Blueprint("api", __name__, url_prefix="/api")
 
 
-def _assemble_notes(skip_notes, label_note_text, label_time, label_user_id, auth_enabled, users):
-    """Combine skip notes and labeling notes into a single chronological timeline list."""
+def _assemble_notes(record_notes, auth_enabled, users):
+    """Format record_notes into a timeline with user attribution."""
+    notes_list = list(record_notes or [])
+    if auth_enabled and notes_list: 
+        known_users = users or {} 
+        missing_users = {
+            item.get("user_id") for item in notes_list if item.get("user_id") is not None and item.get("user_id") not in known_users
+        }
+        if missing_users: 
+            users = {
+                **known_users, **{
+                    u.id: {**u.summarize(), "current_user" : current_user.id == u.id} for u in User.query.filter(User.id.in_(missing_users)).all()
+                }
+            }
     notes = []
-    for item in skip_notes:
-        if item["note"] and str(item["note"]).strip() != "":
-            notes.append({
-                "user_id": item["user_id"],
-                "text": item["note"],
-                "time": item["time"],
-            })
-    if label_note_text and str(label_note_text).strip() != "":
-        notes.append({
-            "user_id": label_user_id,
-            "text": str(label_note_text),
-            "time": label_time,
-        })
-    notes.sort(key=lambda x: x["time"])
-    for note in notes:
-        u_id = note.get("user_id")
+    for item in notes_list:
+        u_id = item.get("user_id")
         if auth_enabled and users and u_id in users:
-            note["user"] = users[u_id]
+            user_obj = users[u_id]  
         else:
-            note["user"] = {
+            user_obj = {
                 "name": "Reviewer",
                 "email": "",
-                "current_user": True
+                "current_user": True if not auth_enabled else False,
             }
-        if "user_id" in note:
-            del note["user_id"]
+        notes.append({
+            "id": item["id"],
+            "record_id": item["record_id"],
+            "text": item["note"],
+            "time": item.get("created_at"),
+            "created_at": item.get("created_at"),
+            "edited_at": item.get("edited_at"),
+            "user": user_obj,
+        })
     return notes
 
 
@@ -590,25 +596,36 @@ def api_get_labeled(project):  # noqa: F401
     subset = request.args.get("subset", default="all", type=str)
     filters = request.args.getlist("filter", type=str)
     latest_first = request.args.get("latest_first", default=1, type=int)
+    user_id_filter = request.args.getlist("user_id", type=int)
 
     with project.db as db:
         if subset == "skipped":
-            state_data = db.get_skipped_table()
+            state_data = db.get_skipped_table(user_ids=user_id_filter)
         elif "is_prior" in filters:
             state_data = db.get_priors()
+            if user_id_filter:
+                state_data = state_data[state_data["user_id"].isin(user_id_filter)]
         else:
-            state_data = db.get_results_table()
+            include_priors = "exclude_prior" not in filters
+            state_data = db.get_results_table(priors=include_priors)
+            if user_id_filter:
+                state_data = state_data[state_data["user_id"].isin(user_id_filter)]
 
-    if subset != "skipped":
-        if subset == "relevant":
-            state_data = state_data[state_data["label"] == 1]
-        elif subset == "irrelevant":
-            state_data = state_data[state_data["label"] == 0]
-        else:
-            state_data = state_data[~state_data["label"].isnull()]
+            if subset == "relevant":
+                state_data = state_data[state_data["label"] == 1]
+            elif subset == "irrelevant":
+                state_data = state_data[state_data["label"] == 0]
+            else:
+                state_data = state_data[~state_data["label"].isnull()]
+
+    state_data = state_data.astype(object).where(state_data.notna(), None)
 
     if "has_note" in filters:
-        state_data = state_data[~state_data["note"].isnull()]
+        with project.db as db:
+            note_r_ids = [
+                r[0] for r in db._conn.cursor().execute("SELECT DISTINCT record_id FROM record_notes").fetchall()
+            ]
+        state_data = state_data[state_data["record_id"].isin(note_r_ids)]
 
     if latest_first == 1:
         state_data = state_data.iloc[::-1]
@@ -656,7 +673,7 @@ def api_get_labeled(project):  # noqa: F401
         }
 
     with project.db as db:
-        batch_skip_notes = db.get_skip_notes_batch(state_data["record_id"].to_list())
+        batch_record_notes = db.get_record_notes(state_data["record_id"].to_list())
 
     records = project.db.input.get_records(state_data["record_id"].to_list())
 
@@ -687,10 +704,7 @@ def api_get_labeled(project):  # noqa: F401
             record_d["state"]["user"] = None
 
         record_d["notes"] = _assemble_notes(
-            batch_skip_notes.get(record_d["record_id"], []),
-            state.get("note"),
-            state.get("time"),
-            state.get("user_id"),
+            batch_record_notes.get(record_d["record_id"], []),
             current_app.config.get("AUTHENTICATION", True),
             users if current_app.config.get("AUTHENTICATION", True) else None
         )
@@ -1433,10 +1447,24 @@ def api_export_dataset(project):
             df_results["user_name"] = df_results["user_id"].map(
                 lambda x: users.get(x, {}).get("name", None)
             )
-        if export_email:
-            df_results["user_email"] = df_results["user_id"].map(
-                lambda x: users.get(x, {}).get("email", None)
-            )
+    with project.db as db:
+        all_export_notes = db.get_record_notes(df_results.index.to_list())
+
+    notes_json = {}
+    for r_id, n_list in all_export_notes.items():
+        formatted = [
+            {
+                "id": n["id"],
+                "user_id": n["user_id"],
+                "text": n["note"],
+                "created_at": n["created_at"],
+                "edited_at": n["edited_at"],
+            }
+            for n in n_list
+        ]
+        notes_json[r_id] = json.dumps(formatted)
+
+    df_results["note"] = df_results.index.map(lambda r_id: notes_json.get(r_id, "[]"))
 
     del df_results["user_id"]
 
@@ -1873,7 +1901,9 @@ def api_label_record(project, record_id):  # noqa: F401
         with project.db as db:
             record = db.get_results_record(record_id)
             item = asdict(db.input.get_records(record_id))
-        item["state"] = record.iloc[0].to_dict()
+        state_series = record.iloc[0].copy()
+        state_series = state_series.where(state_series.notna(), None)
+        item["state"] = state_series.to_dict()
         item["tags_form"] = read_tags_data(project)
         item["recommended_tags"] = read_topic_rankings(project, item)
         item["state"]["user"] = None
@@ -1882,15 +1912,67 @@ def api_label_record(project, record_id):  # noqa: F401
         return jsonify({"result": item})
 
 
-@bp.route("/projects/<project_id>/record/<record_id>/note", methods=["PUT"])
+@bp.route("/projects/<project_id>/record/<record_id>/note", methods=["POST", "PUT"])
 @login_required
 @project_authorization
-def api_update_note(project, record_id):  # noqa: F401
+def api_add_note(project, record_id):  # noqa: F401
+    """Add a new note to a record."""
     note = request.form.get("note", type=str)
-    note = note if note != "" else None
+    if not note and request.json:
+        note = request.json.get("note")
+    note = note if note and note.strip() != "" else None
+
+    if not note:
+        return jsonify(message="Note text cannot be empty"), 400
+
+    user_id = (
+        current_user.id if current_app.config.get("AUTHENTICATION", True) else None
+    )
 
     with project.db as db:
-        db.update_note(record_id, note)
+        note_id = db.add_record_note(int(record_id), user_id, note)
+
+    return jsonify({"success": True, "id": note_id})
+
+
+@bp.route("/projects/<project_id>/note/<note_id>", methods=["PUT"])
+@login_required
+@project_authorization
+def api_edit_note(project, note_id):  # noqa: F401
+    """Edit an existing note by ID."""
+    note_id = int(note_id)
+    note = request.form.get("note", type=str)
+    if not note and request.json:
+        note = request.json.get("note")
+    note = note if note and note.strip() != "" else None
+
+    if not note:
+        return jsonify(message="Note text cannot be empty"), 400
+
+    auth_enabled = current_app.config.get("AUTHENTICATION", True)
+    user_id = current_user.id if auth_enabled else None
+
+    with project.db as db:
+        success = db.edit_record_note(note_id, user_id, note, auth_enabled=auth_enabled)
+        if not success:
+            return jsonify(message="Note not found or forbidden"), 403
+
+    return jsonify({"success": True})
+
+
+@bp.route("/projects/<project_id>/note/<note_id>", methods=["DELETE"])
+@login_required
+@project_authorization
+def api_delete_note(project, note_id):  # noqa: F401
+    """Delete a note by ID."""
+    note_id = int(note_id)
+    auth_enabled = current_app.config.get("AUTHENTICATION", True)
+    user_id = current_user.id if auth_enabled else None
+
+    with project.db as db:
+        success = db.delete_record_note(note_id, user_id=user_id, auth_enabled=auth_enabled)
+        if not success:
+            return jsonify(message="Note not found or forbidden"), 403
 
     return jsonify({"success": True})
 
@@ -1933,10 +2015,12 @@ def api_skip_record(project, record_id):
         db.skip_record(
             record_id,
             user_id=user_id,
-            note=note,
             duration_raw=duration_raw,
             duration_away=duration_away,
         )
+        if note:
+            db.add_record_note(record_id, user_id, note)
+
     return jsonify({"success": True})
 
 
@@ -1969,19 +2053,17 @@ def api_get_record(project):  # noqa: F401
                     return jsonify({"result": None, "status": "setup"})
 
         item = asdict(db.input.get_records(pending["record_id"].iloc[0]))
-        skip_notes = db.get_skip_notes(item["record_id"])
-        lbl_record = db.get_results_record(item["record_id"])
-        lbl_note = lbl_record.iloc[0].get("note") if not lbl_record.empty else None
-        lbl_time = lbl_record.iloc[0].get("time") if not lbl_record.empty else None
-        lbl_user_id = lbl_record.iloc[0].get("user_id") if not lbl_record.empty else None
+        record_notes = db.get_record_notes(item["record_id"])
 
-    item["state"] = pending.iloc[0].to_dict()
+    state_series = pending.iloc[0].copy()
+    state_series = state_series.where(state_series.notna(), None)
+    item["state"] = state_series.to_dict()
     item["tags_form"] = read_tags_data(project)
     item["recommended_tags"] = read_topic_rankings(project, item)
     item["state"]["user"] = None
     del item["state"]["user_id"]
     item["notes"] = _assemble_notes(
-        skip_notes, lbl_note, lbl_time, lbl_user_id,
+        record_notes,
         current_app.config.get("AUTHENTICATION", True),
         None
     )
