@@ -40,7 +40,7 @@ import {
   StoppingSuggestion,
   TeamStatsCard,
   TimeSavedCard,
-  WordCounts,
+  // WordCounts,
 } from "ProjectComponents/AnalyticsComponents";
 import { ProjectAPI } from "api";
 import { projectStatuses } from "globals.js";
@@ -377,7 +377,7 @@ const AnalyticsPage = () => {
           >
             <Tab label="Words of Importance (temporarily disabled)" />
           </Tabs>
-          {/*activeInsightsTab === 0 && <WordCounts project_id={project_id} />*/}
+          {/* {activeInsightsTab === 0 && <WordCounts project_id={project_id} />} */}
         </Grid>
       </Stack>
 
