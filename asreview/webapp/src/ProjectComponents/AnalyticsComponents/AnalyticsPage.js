@@ -375,9 +375,9 @@ const AnalyticsPage = () => {
             value={activeInsightsTab}
             onChange={(event, newValue) => setActiveInsightsTab(newValue)}
           >
-            <Tab label="Words of Importance" />
+            <Tab label="Words of Importance (temporarily disabled)" />
           </Tabs>
-          {activeInsightsTab === 0 && <WordCounts project_id={project_id} />}
+          {/*activeInsightsTab === 0 && <WordCounts project_id={project_id} />*/}
         </Grid>
       </Stack>
 

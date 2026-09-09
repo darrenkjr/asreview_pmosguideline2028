@@ -1557,9 +1557,9 @@ def api_get_progress_info(project):  # noqa: F401
 
     try:
         with project.db as db:
-            labels = db.get_results_table(priors=include_priors)["label"]
-            labels_without_priors = db.get_results_table(priors=False)["label"]
-            n_records = len(project.db.input)
+            labels = db.get_results_table("label", priors=include_priors)["label"]
+            labels_without_priors = db.get_results_table("label", priors=False)["label"]
+            n_records = len(db.input)
         n_priors = len(labels) - len(labels_without_priors)
 
     except (FileNotFoundError, ValueError, ProjectError):
