@@ -8,7 +8,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: darrenkjr/asreview_pmosguideline2028
+  IMAGE_NAME: international-pmos-guideline-data/asreview_pmosguideline2028
 
 jobs:
   build:
