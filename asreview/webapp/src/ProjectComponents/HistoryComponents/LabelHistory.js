@@ -45,13 +45,19 @@ const LabelHistory = ({
   const [label, setLabel] = React.useState("all");
   const [state, setState] = React.useState(filterQuery);
 
-  const { data: usersData } = useQuery(
+  const {
+    data: usersData,
+    isSuccess: usersSettled,
+    isError: usersFailed,
+  } = useQuery(
     ["fetchProjectUsers", { project_id }],
     ProjectAPI.fetchProjectUsers,
     {
       refetchOnWindowFocus: false,
     },
   );
+
+  const userFilterReady = usersSettled || usersFailed;
 
   const initializedUserFilter = React.useRef(false);
 
@@ -229,6 +235,7 @@ const LabelHistory = ({
           label={label}
           filterQuery={state}
           setFilterQuery={setState}
+          filtersReady={userFilterReady}
         />
       </Container>
       {showExport && (

@@ -24,6 +24,7 @@ const LabeledRecord = ({
   filterQuery,
   setFilterQuery,
   mode = "oracle",
+  filtersReady = true,
 }) => {
   const { orientation, modelLogLevel, expandAbstract } = useReviewSettings();
 
@@ -71,6 +72,7 @@ const LabeledRecord = ({
     ],
     ProjectAPI.fetchLabeledRecord,
     {
+      enabled: filtersReady,
       getNextPageParam: (lastPage) => lastPage.next_page ?? false,
     },
   );
