@@ -295,7 +295,7 @@ class ProjectAPI {
   }
 
   static fetchLabeledRecord({ pageParam = 1, queryKey }) {
-    const { project_id, subset, filter, user_id } = queryKey[1];
+    const { project_id, subset, filter, user_id, latest_first } = queryKey[1];
 
     const url = api_url + `projects/${project_id}/labeled`;
     return new Promise((resolve, reject) => {
@@ -305,6 +305,7 @@ class ProjectAPI {
             subset: subset,
             filter: filter,
             user_id: user_id,
+            latest_first: latest_first ?? 1,
             page: pageParam,
           },
           paramsSerializer: (params) => {

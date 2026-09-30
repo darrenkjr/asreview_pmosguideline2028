@@ -843,6 +843,106 @@ class Database:
         df_results["tags"] = df_results["tags"].map(json.loads, na_action="ignore")
         return df_results
 
+    def get_results_page(
+        self,
+        priors=True,
+        subset="all",
+        user_ids=None,
+        has_note=False,
+        latest_first=True,
+        limit=None,
+        offset=0,
+        count_only=False
+        ):
+        """Get a filtered, ordered page of labeled records from the results table. 
+        Primary use is for history and collection browsing with filters applied by UI
+        Specificaly to not need to load entire dataset in memory and run filters on sql backend
+
+        - labeled means ``label is not NULL`` (pending rows are never returned);
+        - a prior is a labeled row with ``querier is NULL``;
+        - only the base record of each group is returned
+          (``record_id IN (SELECT group_id FROM <record table>)``);
+        - rows come back in ``rowid`` order, reversed when ``latest_first``.
+
+        Parameters
+        ----------
+        priors: bool | str
+            True keeps priors, False drops them (as in `get_results_table`),
+            "only" returns priors only (as in `get_priors`).
+        subset: str
+            "relevant" (label 1), "irrelevant" (label 0), anything else for both.
+        user_ids: list[int] | None
+            Keep rows whose user_id is in this list. Empty or None means no filter.
+            Rows with a NULL user_id never match a non-empty list.
+        has_note: bool
+            Keep only records with at least one row in `record_notes`.
+        latest_first: bool
+            Order by rowid descending instead of ascending.
+        limit: int | None
+            Maximum number of rows. None returns every matching row.
+        offset: int
+            Number of rows to skip. Only used when `limit` is set.
+        count_only: bool
+            Return the number of matching rows instead of a DataFrame.
+
+        Returns
+        -------
+        pd.DataFrame | int
+            All columns of the results table with the same dtypes as
+            `get_results_table`, and tags parsed from JSON. An int when
+            `count_only` is True. With filters applied to align with frontend UI options
+            Goal is to run this query on sql backend instead of loading everything and filtering it in memory
+        """
+
+        sql_where = [
+            "label is not NULL", 
+            f"record_id in ( SELECT group_id FROM {self.record_table_name})"
+        ]
+
+        params = []
+
+        #Prior filters
+        if priors == "only":
+            sql_where.append("querier is NULL")
+        elif not priors:
+            sql_where.append("querier is NOT NULL")
+
+        #relevant / irrelevant filter
+        if subset == "relevant":
+            sql_where.append("label = 1")
+        elif subset == "irrelevant":
+            sql_where.append("label = 0")
+        #user id filter
+        if user_ids: 
+            sql_where.append(f"user_id IN ({','.join(['?'] * len(user_ids))})")
+            params.extend(user_ids)
+        # has note filter
+        if has_note: 
+            sql_where.append("record_id IN (SELECT record_id FROM record_notes)")
+        
+        sql_where_str = "WHERE " + " AND ".join(sql_where)
+        if count_only:
+            return self._conn.execute(
+                f"SELECT COUNT (*) FROM results {sql_where_str}",
+                params,
+            ).fetchone()[0]
+
+        order = "DESC" if latest_first else "ASC"
+        sql = f"SELECT * FROM results {sql_where_str} ORDER BY rowid {order}"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([int(limit), int(offset)])
+
+        df_results = pd.read_sql_query(
+            sql,
+            self._conn,
+            params = params, 
+            dtype=RESULTS_TABLE_COLUMNS_PANDAS_DTYPES
+        )
+        df_results["tags"] = df_results["tags"].map(json.loads, na_action="ignore")
+        return df_results
+
+
     def get_pool(self):
         """Get the unlabeled, not-pending records in ranking order.
 

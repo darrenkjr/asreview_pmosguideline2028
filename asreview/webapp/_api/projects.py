@@ -584,11 +584,145 @@ def api_search_data(project):  # noqa: F401
 
     return jsonify({"result": result})
 
-
 @bp.route("/projects/<project_id>/labeled", methods=["GET"])
 @login_required
 @project_authorization
-def api_get_labeled(project):  # noqa: F401
+def api_get_labeled(project): 
+    """Get labeled records for the Collection screen.
+
+    To go back to the previous implementation, replace api_get_labeled_sql
+    with api_get_labeled_legacy on the line below. Both return the same
+    response for the same request.
+    """
+    return api_get_labeled_sql(project)   
+
+def api_get_labeled_sql(project):  
+    """Get labeled records for the colleciton screen, filtered first in sql"""
+    page = request.args.get("page", default=None, type=int)
+    per_page = request.args.get("per_page", default=20, type=int)
+    subset = request.args.get("subset", default="all", type=str)
+    filters = request.args.getlist("filter", type=str)
+    latest_first = request.args.get("latest_first", default=1, type=int)
+    user_id_filter = request.args.getlist("user_id", type=int)
+
+    if per_page <1 or (page is not None and page <1): 
+        return abort(400)
+    empty_payload = {
+        "count" : 0, 
+        "next_page" : None, 
+        "previous_page" : None, 
+        "result" : []
+    }
+
+    if "is_prior" in filters:
+        priors_arg, subset_arg = "only", "all"
+    elif "exclude_prior" in filters: 
+        priors_arg, subset_arg = False, subset
+    else: 
+        priors_arg, subset_arg = True, subset
+    
+    query = dict(
+        priors = priors_arg, 
+        subset=subset_arg,
+        user_ids = user_id_filter, 
+        has_note = "has_note" in filters,
+    )
+
+    with project.db as db: 
+        if page is None: 
+            state_data = db.get_results_page(**query, latest_first = latest_first ==1)
+        else: 
+            state_data = db.get_results_page(**query, 
+            latest_first = latest_first ==1, 
+            limit = per_page + 1,
+            offset=(page - 1) * per_page,
+            )
+        if len(state_data) == 0 and page >1: 
+            if db.get_results_page(**query, count_only=True) > 0: 
+                return abort(404)
+
+    if len(state_data) == 0: 
+        return jsonify(empty_payload)
+
+    if page is not None:
+        next_page = page + 1 if len(state_data) > per_page else None
+        previous_page = page - 1 if page > 1 else None
+        state_data = state_data.iloc[:per_page].copy()
+    else:
+        next_page = None
+        previous_page = None
+
+    state_data = state_data.astype(object).where(state_data.notna(), None)
+
+    if current_app.config.get("AUTHENTICATION", True):
+        project_entry = Project.query.filter(
+            Project.project_id == project.project_id
+        ).one_or_none()
+        users = {
+            **{
+                u.id: {**u.summarize(), "owner": False}
+                for u in project_entry.collaborators
+            },
+            project_entry.owner.id: {**project_entry.owner.summarize(), "owner": True},
+        }
+        users = {
+            i: {**u, "current_user": current_user.id == u["id"]}
+            for i, u in users.items()
+        }
+
+    with project.db as db:
+        batch_record_notes = db.get_record_notes(state_data["record_id"].to_list())
+
+    records = project.db.input.get_records(state_data["record_id"].to_list())
+
+    # Pre-fetch shared tags config and topic rankings ONCE before the loop
+    tags_form = read_tags_data(project)
+
+    rankings_path = Path(project.project_path, "precomputed_topic_rankings.json")
+    all_topic_rankings = None
+    if rankings_path.exists():
+        try:
+            with open(rankings_path, "r", encoding="utf-8") as f:
+                all_topic_rankings = json.load(f).get("rankings", {})
+        except Exception:
+            all_topic_rankings = None
+
+    result = []
+    for (_, state), record in zip(state_data.iterrows(), records):
+        record_d = asdict(record)
+        record_d["state"] = state.to_dict()
+        record_d["tags_form"] = tags_form
+        record_d["recommended_tags"] = read_topic_rankings(
+            project, record_d, preloaded_rankings=all_topic_rankings
+        )
+
+        if current_app.config.get("AUTHENTICATION", True):
+            record_d["state"]["user"] = users.get(record_d["state"]["user_id"], None)
+        else:
+            record_d["state"]["user"] = None
+
+        record_d["notes"] = _assemble_notes(
+            batch_record_notes.get(record_d["record_id"], []),
+            current_app.config.get("AUTHENTICATION", True),
+            users if current_app.config.get("AUTHENTICATION", True) else None
+        )
+
+        del record_d["state"]["user_id"]
+        result.append(record_d)
+
+    return jsonify(
+        {
+            "count": len(state_data),
+            "next_page": next_page,
+            "previous_page": previous_page,
+            "result": result,
+        }
+    )
+
+# @bp.route("/projects/<project_id>/labeled", methods=["GET"])
+# @login_required
+# @project_authorization
+def api_get_labeled_legacy(project):  # noqa: F401
     """Get all records classified as labeled documents"""
 
     page = request.args.get("page", default=None, type=int)

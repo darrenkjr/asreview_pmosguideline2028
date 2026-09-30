@@ -11,7 +11,7 @@ import {
 } from "@mui/material";
 import * as React from "react";
 
-import { FileDownloadOutlined } from "@mui/icons-material";
+import { FileDownloadOutlined, SwapVert } from "@mui/icons-material";
 import { useToggle } from "hooks/useToggle";
 import { useParams } from "react-router-dom";
 import { ExportDialog, Filter, LabeledRecord } from ".";
@@ -44,6 +44,7 @@ const LabelHistory = ({
 
   const [label, setLabel] = React.useState("all");
   const [state, setState] = React.useState(filterQuery);
+  const [latestFirst, toggleLatestFirst] = useToggle(true);
 
   const {
     data: usersData,
@@ -137,6 +138,17 @@ const LabelHistory = ({
                 onClick={() => {
                   setLabel("irrelevant");
                 }}
+              />
+              <Chip
+                icon={<SwapVert />}
+                label={latestFirst ? "Newest first" : "Oldest first"}
+                variant="outlined"
+                onClick={toggleLatestFirst}
+                aria-label={
+                  latestFirst
+                    ? "Sorted newest first. Select to sort oldest first."
+                    : "Sorted oldest first. Select to sort newest first."
+                }
               />
               {/*
               <Chip
@@ -236,6 +248,7 @@ const LabelHistory = ({
           filterQuery={state}
           setFilterQuery={setState}
           filtersReady={userFilterReady}
+          latestFirst={latestFirst}
         />
       </Container>
       {showExport && (

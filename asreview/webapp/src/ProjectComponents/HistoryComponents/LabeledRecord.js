@@ -25,6 +25,7 @@ const LabeledRecord = ({
   setFilterQuery,
   mode = "oracle",
   filtersReady = true,
+  latestFirst = true,
 }) => {
   const { orientation, modelLogLevel, expandAbstract } = useReviewSettings();
 
@@ -68,6 +69,7 @@ const LabeledRecord = ({
         subset: label,
         filter: regularFilters,
         user_id: userFilters,
+        latest_first: latestFirst ? 1 : 0,
       },
     ],
     ProjectAPI.fetchLabeledRecord,
