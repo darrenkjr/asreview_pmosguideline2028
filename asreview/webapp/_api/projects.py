@@ -1741,9 +1741,9 @@ def api_get_team_stats(project):
 
     try:
         with project.db as db:
-            results = db.get_results_table(["label", "user_id"])
+            counts = db.get_user_counts()
     except Exception:
-        results = pd.DataFrame(columns=["label", "user_id"])
+        counts = []
 
     try:
         project_entry = Project.query.filter(
@@ -1764,31 +1764,24 @@ def api_get_team_stats(project):
             "n_screened": 0,
             "n_relevant": 0,
             "n_not_relevant": 0,
+            "n_pending" : 0,
         }
 
     # Count from results
-    for _, row in results.iterrows():
-        u_id = row.get("user_id")
-        if pd.isna(u_id):
-            continue
-        u_id = int(u_id)
-        label = row.get("label")
-        if pd.isna(label):
-            continue
-        
+    for c in counts: 
+        u_id = c["user_id"]
+
         if u_id not in user_stats:
             user_stats[u_id] = {
                 "user": {"id": u_id, "name": f"User {u_id}", "email": ""},
                 "n_screened": 0,
                 "n_relevant": 0,
                 "n_not_relevant": 0,
+                "n_pending": 0,
             }
-        
-        user_stats[u_id]["n_screened"] += 1
-        if label == 1:
-            user_stats[u_id]["n_relevant"] += 1
-        elif label == 0:
-            user_stats[u_id]["n_not_relevant"] += 1
+
+        for key in ("n_screened", "n_relevant", "n_not_relevant", "n_pending"):
+            user_stats[u_id][key] = c[key]
 
     stats = list(user_stats.values())
     return jsonify(stats)

@@ -63,6 +63,9 @@ export default function TeamStatsCard({ project_id }) {
                 <TableCell align="right" sx={{ fontWeight: "bold" }}>
                   Irrelevant (No)
                 </TableCell>
+                <TableCell align="right" sx={{ fontWeight: "bold" }}>
+                  Pending (Awaiting screening decision)
+                </TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -72,6 +75,9 @@ export default function TeamStatsCard({ project_id }) {
                     <TableCell>
                       <Skeleton width={120} />
                       <Skeleton width={180} height={12} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Skeleton width={40} sx={{ display: "inline-block" }} />
                     </TableCell>
                     <TableCell align="right">
                       <Skeleton width={40} sx={{ display: "inline-block" }} />
@@ -117,11 +123,14 @@ export default function TeamStatsCard({ project_id }) {
                     <TableCell align="right">
                       {row.n_not_relevant.toLocaleString()}
                     </TableCell>
+                    <TableCell align="right">
+                      {row.n_pending.toLocaleString()}
+                    </TableCell>
                   </TableRow>
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={4} align="center">
+                  <TableCell colSpan={5} align="center">
                     <Typography
                       variant="body2"
                       color="text.secondary"

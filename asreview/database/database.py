@@ -1005,6 +1005,45 @@ class Database:
             self._conn,
         )["record_id"]
 
+    def get_user_counts(self):
+        """Count decided and pending records for each user.
+
+        Uses the same rows as get_results_table(priors=True, pending=True):
+        group representatives only. Rows without a user_id are not counted.
+
+        Returns
+        -------
+        list[dict]
+            One dict per user_id with keys user_id, n_screened, n_relevant,
+            n_not_relevant and n_pending. n_pending is the number of records
+            assigned to the user that do not have a label yet.
+        """
+        rows = self._conn.execute(
+            f"""
+            SELECT
+                user_id,
+                SUM(label IS NOT NULL) AS n_screened,
+                SUM(label = 1)         AS n_relevant,
+                SUM(label = 0)         AS n_not_relevant,
+                SUM(label IS NULL)     AS n_pending
+            FROM results
+            WHERE user_id IS NOT NULL
+              AND record_id IN (SELECT group_id FROM {self.record_table_name})
+            GROUP BY user_id
+            ORDER BY user_id
+            """
+        ).fetchall()
+        return [
+            {
+                "user_id": int(r[0]),
+                "n_screened": int(r[1] or 0),
+                "n_relevant": int(r[2] or 0),
+                "n_not_relevant": int(r[3] or 0),
+                "n_pending": int(r[4] or 0),
+            }
+            for r in rows
+        ]
+
     def get_pending(self, user_id=None):
         """Get pending records from the results table.
 
